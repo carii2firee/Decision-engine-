@@ -1,0 +1,3589 @@
+
+import re
+import hashlib
+import json
+import datetime
+import random
+
+
+from dotenv import load_dotenv
+
+
+# Utils
+load_dotenv()
+user_credit_sessions: dict = {}
+
+
+
+# Match a decision to a final pathway so it can execute it directly
+GREETING_TRIGGERS = {
+    # Basic
+    "hi", "hello", "hey",
+
+    # Casual / slang
+    "yo", "sup", "wassup", "what's up", "whats up", "wsp", "sup bro", "yo yo",
+
+    # Friendly variants
+    "hiya", "howdy", "hey there", "hello there",
+
+    # Time-based greetings
+    "good morning", "morning",
+    "good afternoon", "afternoon",
+    "good evening", "evening",
+
+    # Polite / formal
+    "greetings", "salutations",
+
+    # Short / minimal inputs
+    "hii", "heyy", "helloo", "yoo",
+
+    # Check-in style (important for real users)
+    "how's it going", "hows it going",
+    "how are you", "how are u",
+    "how you doing", "how u doing",
+
+    # One-word casual opens
+    "yo wassup", "hey man", "hey bro", "hey dude",
+}
+
+
+FINAL_PATH = [
+    "utilization",
+    "payment_history",
+    "collections",
+    "general_credit",
+    "build_from_zero",
+
+]
+
+
+SCORE_SIMULATION_RANGES = {
+
+    "collections": {
+
+        "fast": True,
+        "timeline_months": [1, 2, 3],
+        "improvement_ranges": {
+            "pay_for_delete":    [(20, 40), (35, 60), (40, 80)],  # removed entirely
+            "paid_in_full":      [(10, 25), (20, 40), (25, 50)],  # still shows but resolved
+            "settled":           [(5, 15),  (10, 20), (15, 30)],  # shows as settled
+
+
+            "urgency_note": "Here's something you should always remember when visualizing this. "
+            "The longer it takes you to resolve the collection, the less you are yo actually follow through with the payment."
+        }
+
+    },
+
+    "utilization": {
+        "fast": True,
+        "timeline_months": [1, 2, 3],
+        "improvement_ranges": {
+            "high_to_low":   [(5, 15),  (15, 30), (20, 40)],  # 50%+ → under 10%
+            "mid_to_low":    [(3, 10),  (8, 20),  (10, 25)],  # 30-50% → under 10%
+            "slight_reduce": [(1, 5),   (3, 8),   (5, 12)],   # minor paydown
+        }
+    },
+    "payment_history": {
+        "fast": False,
+        "timeline_months": [3, 6, 12],
+        "improvement_ranges": {
+            "clean_streak":  [(2, 8),   (8, 20),  (20, 40)],
+            "goodwill_removal": [(20, 40), (30, 60), (40, 80)],
+        }
+    },
+    "build_from_zero": {
+        "fast": False,
+        "timeline_months": [3, 6, 12],
+        "improvement_ranges": {
+            "secured_card":  [(0, 0), (580, 620), (630, 680)],  # absolute ranges
+        }
+    }
+}
+
+
+
+# Beginner keyword logic
+BEGINNER_CARD_TRIGGERS = {
+    # direct card questions
+    "which credit card", "what credit card", "best credit card",
+    "best card", "which card", "what card", "good card",
+    "card for me", "card options", "card choices", "card recommendations",
+    "recommend a card", "suggest a card", "what card should i get",
+    "which card should i get", "what card do i get", "which card do i get",
+
+    # beginner framing
+    "beginner credit card", "beginner friendly card", "card for beginners",
+    "credit card for beginners", "starter credit card", "starting credit card",
+    "first credit card", "my first card", "first card ever",
+    "credit for starters", "credit card for starters",
+    "new to credit cards", "never had a card", "never had credit card",
+
+    # building framing
+    "build credit with a card", "card to build credit",
+    "credit card to build credit", "what card builds credit",
+    "which card builds credit fastest", "card that builds credit",
+    "card to start building", "start building with a card",
+
+    # options / choices framing
+    "credit card options", "credit options", "card options for beginners",
+    "credit options for beginners", "what are my card options",
+    "what are my credit options", "what options do i have",
+    "card preferences for beginner", "card preferences",
+
+    # where do I start
+    "where do i start with credit", "how do i start with a card",
+    "which credit card do i begin with", "do i start with",
+    "where do i begin with cards", "how do i pick a card",
+    "how do i choose a card", "how do i choose a credit card",
+    "what should i look for in a card", "what to look for in a card",
+
+    # casual
+    "what card should i cop", "what card should i get rn",
+    "what card is worth it", "is there a good card",
+    "any good cards", "any card recommendations",
+    "hook me up with a card rec", "card rec", "card recs",
+}
+
+
+
+# A reserved pathway to topics to improve efficiency.
+PATH_TO_TOPIC = {
+    "late_payment": "payment_history",
+    "high_utilization": "utilization",
+    "collections": "collections",
+    "new_inquiry": "inquiries",
+    "closed_account": "credit_age",
+    "no_credit": "build_from_zero",
+    "thin_file": "build_from_zero"
+}
+
+
+CLARIFY_QUESTIONS = {
+        "credit_score": "What's your current credit score if you currently know it? ",
+        "has_credit_card": " The first question I'll ask  to help you is do you currently have any credit cards active? ",
+        "missed_payments": "Have you missed any payments in the last 12 months for any reason at all? ",
+        "high_utilization": "Are your current credit balances above 30% of your credit spending limit the credit agency gave you? ",
+        "collections": "Do you have any unpaid collections that the credit agency has applied to your credit report?"
+}
+
+# Collections list designed to store users response to collection-based questions
+COLLECTION_QUESTIONS = {
+    "collections_first": "Do you currently have any accounts in collections?",
+    "paid_collections": "Have you already paid off any collections?",
+    "recent_collections": "Did any of your collections happen recently?",
+    "multiple_collections": "Do you currently have multiple collections accounts?",
+    "collection_contact": "Have collection agencies been contacting you recently?",
+    "medical_collections": "Are any of your collections medical bills?",
+    "collection_dispute": "Have you disputed any collections before?",
+    "collection_goal": "Is removing collections one of your main credit goals?",
+
+}
+
+COLLECTION_FLOW = [
+    "paid_collections",
+    "recent_collections",
+    "multiple_collections",
+    "medical_collections",
+    "collection_dispute",
+    "collection_goal",
+]
+
+
+
+
+
+
+
+# ===========================================================================
+# Keywords — I can add new terms as I wish.
+# ===========================================================================
+
+# Appreciation responses for WRIN
+APPRECIATION_RESPONSES = [
+    "Glad that helped, ",
+    "You're welcome, ",
+    "Got you, ",
+    "No problem, ",
+    "Happy to help,  "
+    "Glad it makes sense, ",
+    "Yep anytime, ",
+    "That's what I'm here for! ",
+]
+
+
+# make wrin understand user goals and ambitious
+GOAL_KEYWORDS = {
+    "buy_house": ["buy a house", "mortgage", "home loan", "house", "get a house", "purchase a crib", "buy a crib"],
+    "buy_car": ["buy a car", "car loan", "auto loan", "buy a new whip", "get a new whip for myself", "attain a vehicle", "get a vehicle"],
+    "apartment": ["apartment", "rent", "landlord"],
+    "credit_card": ["credit card", "get approved", "get a new fico card", "new credit card", "new credit way", "fico card", "invest into my future"],
+    "travel": ["travel", "points", "miles","explore", "travel overseas", "go to a new place", "go somewhere new", "explore the world", "exploration", "wander outside my comfort zone"],
+    "business": ["business", "llc", "business credit", "entrepreneurship", "start my own company", "company", "enterprise", "small business", "small company", "big company"],
+
+}
+
+
+BOOST_WORDS = {
+    "utilization": ["utilization", "balance", "limit", "30%"],
+    "payment_history": ["late", "missed", "30 days late"],
+    "credit_age": ["oldest account", "credit age"],
+    "five_factors": ["affects", "calculated", "factors", "impacts"],
+}
+
+
+TOPIC_KEYWORDS = {
+
+"credit_score_basics": [
+    "what is a credit score",
+    "credit score",
+    "what does credit score mean",
+    "how credit score works",
+    "what is fico",
+    "fico score", "credit number", "whats a credit score",
+],
+
+
+    "utilization": [
+        "utilization", "balance", "limit", "maxed", "maxed out",
+        "high balance", "too high balance", "near limit",
+        "30%", "credit usage", "ratio", "should i pay my balance",
+        "my balance is high",
+    ],
+
+    "payment_history": [
+        "late", "late payment", "missed payment",
+        "forgot to pay", "didn't pay", "owe",
+        "payment history", "paid late", "days late",
+        "missed my payment", "delinquent", "30 days late"
+    ],
+
+    "credit_age": [
+        "credit age", "length of credit", "old account",
+        "average age", "closed my oldest card",
+        "oldest account", "credit history age",
+        "how long my credit", "closing a card"
+    ],
+
+    "inquiries": [
+        "hard inquiry", "credit check", "applied",
+        "application", "dealer ran my credit",
+        "hard pull", "soft pull", "pre approval",
+        "does applying hurt", "credit inquiry"
+    ],
+
+    "collections": [
+        "collections", "collection account",
+        "charge off", "sent to collections",
+        "in collections", "debt collector",
+        "pay collections", "collection balance"
+    ],
+
+    "build_from_zero": [
+        "no credit", "build credit", "start credit",
+        "first credit card", "new to credit",
+        "zero credit", "no fico score",
+        "thin file", "how to start credit"
+    ],
+
+    "score_ranges": [
+        "credit score range", "what is a good score",
+        "what is a bad score", "credit level",
+        "what score is good", "what score is bad",
+        "fico range", "score range"
+    ],
+
+    "five_factors": [
+        "what affects my credit", "how is my credit calculated",
+        "five factors", "what impacts my score",
+        "payment history utilization length credit mix",
+        "what makes up my score", "how does a credit score actually work",
+        "how does a FICO score actually work", "credit actual function", "FICO function",
+        "fico function", "credit function",
+    ],
+
+    "credit_freeze": [
+        "credit freeze", "freeze credit",
+        "unfreeze credit", "thaw credit",
+        "lock my credit", "identity theft protection"
+    ],
+
+    "credit_mix": [
+        "credit mix", "types of credit",
+        "installment loan", "revolving credit",
+        "loan and credit card", "different accounts"
+    ],
+
+    "check_credit": [
+        "check my credit", "see my credit score",
+        "free credit report", "annual credit report",
+        "credit karma", "where do i check my credit"
+    ],
+
+    "secured_card": [
+        "secured card", "secured credit card",
+        "deposit card", "collateral card",
+        "upgrade card", "graduate card"
+    ],
+
+    "credit_repair": [
+        "fix my credit", "repair my credit",
+        "remove negative items", "dispute",
+        "pay for delete", "credit repair company",
+        "charge off help"
+    ],
+
+    "general_credit": []
+}
+
+# =================================================
+# Question tree that provide clarification
+# =================================================
+
+
+
+CLARIFY_TREE = {
+    "diagnose": {
+        "general_credit": [
+            ("late_payment", "Have you missed any payments in the last 12 months?"),
+            ("high_utilization", "Are your credit card balances above 30% of the limit?"),
+            ("new_inquiry", "Have you applied for new credit in the last 3 months?"),
+            ("closed_account", "Did you close a credit card recently?"),
+            ("collections", "Do you have any collections on your credit report?")
+        ]
+    },
+    "improve": {
+        "general_credit": [
+            ("has_credit_card", "Do you currently have any credit cards?"),
+            ("high_utilization", "Are your balances above 30% of your limit?"),
+            ("missed_payments", "Do you have any late payments?"),
+            ("collections", "Do you have any collections on your credit report?"),
+        ]
+    },
+    "decide": {
+        "close_card": [
+            ("annual_fee", "Are you closing it because of an annual fee?"),
+            ("not_using", "Are you closing it because you don't use it?"),
+            ("debt", "Are you trying to avoid debt?")
+        ],
+        # ADD THIS
+        "general_credit": [
+            ("has_credit_card", "First, do you currently have any credit cards open?"),
+            ("high_utilization", "Are your balances above 30% of your limit?"),
+            ("missed_payments", "Have you had any late payments in the last 12 months?"),
+            ("collections", "Do you have any collections on your report?"),
+        ]
+    }
+}
+
+
+CREDIT_PATH_KEYWORDS = {
+
+    "no_credit": [
+        "no credit",
+        "just turned 18",
+        "never had a credit card",
+        "how do i start credit",
+        "build credit from scratch",
+        "no credit history"
+    ],
+
+    "low_score": [
+        "low credit score",
+        "score is 500",
+        "score is 520",
+        "score is 550",
+        "bad credit",
+        "poor credit"
+    ],
+
+    "score_dropped": [
+        "score dropped",
+        "credit score went down",
+        "why did my score drop",
+        "lost points"
+    ],
+
+    "high_utilization": [
+        "maxed out",
+        "high balance",
+        "credit card balance is high",
+        "utilization",
+        "over 30%",
+        "over my limit"
+    ],
+
+    "late_payment": [
+        "missed payment",
+        "late payment",
+        "forgot to pay",
+        "30 days late"
+    ],
+
+    "building_credit": [
+        "how do i improve my credit",
+        "raise my credit score",
+        "build my credit",
+        "improve my score"
+    ]
+}
+
+
+# =================================================
+# Intent keywords list.
+# =================================================
+
+
+INTENT_KEYWORDS = {
+"improve": [
+    "improve", "raise", "increase", "build", "fix", "grow",
+    "boost", "help my score", "make my score go up",
+    "change my credit score", "improve my credit",
+    "raise my credit", "increase my score",
+    "how to improve", "how do i improve",
+    "how to raise", "how do i raise",
+    "how to build credit", "how do i build credit",
+    "how to fix my credit", "fix my credit",
+    "better my credit", "get my score up",
+    "trying to improve", "trying to raise",
+    "working on my credit", "build my score",
+    "get better credit", "want better credit",
+    "how can i improve", "how can i raise",
+    "how can i fix my credit",
+    "what should i do to improve",
+    "what can i do to improve",
+    "steps to improve my credit",
+    "plan to improve my credit",
+    "how to get to 700", "how to get to 750", "how to get to 800"
+],
+
+"diagnose": [
+    "why", "why did", "why did my score",
+    "dropped", "went down", "lost points",
+    "what happened", "what caused",
+    "why is my score lower", "why is my credit lower",
+    "my score dropped", "my credit dropped",
+    "score went down", "credit went down",
+    "my score changed", "my score went up",
+    "why did it go down", "why did it drop",
+    "why did it change",
+    "i lost points", "i gained points",
+    "my score is lower", "my score is higher",
+    "what made my score go down",
+    "what made my score go up",
+    "why did i lose points",
+    "why did i gain points",
+    "why did my credit change",
+    "what's hurting my credit",
+    "what is hurting my credit",
+    "what is affecting my credit",
+    "what's affecting my credit", "change my credit score", "my credit change score",
+],
+
+    "decide": [
+        "should i", "should i open", "should i close", "should i apply",
+        "should i pay off", "should i pay down", "should i keep",
+        "should i cancel", "should i get", "should i use",
+
+        "is it smart", "is it bad to", "is it good to", "is it okay to",
+        "is it worth it", "is this smart", "is this bad",
+
+        "thinking about", "im thinking about", "i am thinking about",
+        "i was thinking about", "i'm thinking about",
+
+        "would you", "would you recommend", "would you do",
+        "what would you do", "what do you think",
+        "whats your perspective", "your opinion",
+
+        "help me decide", "cant decide", "i cant decide",
+        "not sure if i should", "im not sure if i should",
+        "i dont know if i should",
+
+        "what happens if", "if i do this", "if i open",
+        "if i close", "if i apply", "if i pay this off",
+
+        "will this hurt my credit", "will this help my credit",
+        "does this hurt my credit", "does this help my credit",
+        "will this affect my credit", "does this affect my credit",
+
+        "pros and cons", "tradeoffs", "is there a downside",
+        "is there an upside", "good idea or bad idea",
+
+        "which is better", "which is smarter",
+        "better to", "better option", "whats better", "what's better",
+    ],
+
+
+    "learn": ["what is", "how does", "explain", "learn", "teach me", "i wanna know", "i can learn",
+            "what do you know about", "interesting idea", "wha is a", "what is an", "how does", "tell me about", "define",
+            "meaning of", "how do", "what exactly is", "can you explain", "i dont understand", "confused about", "what does",
+            "what counts as", "teach me", "how does a credit score work", "what is a credit score", "whats an credit score?",
+
+              ]
+}
+
+# ===========================================================================
+# INTENT FRAMEWORK
+# Four intents that map to completely different response styles:
+#
+#   learn    → user wants to understand a concept
+#   improve  → user wants actionable steps to raise their score
+#   diagnose → user wants to understand WHY something happened
+#   decide   → user is evaluating whether to take a specific action
+# ===========================================================================
+
+INTENT_DEFINITIONS = {
+
+    "learn": {
+        "description": "User wants to understand how credit works",
+        "phrases": [
+            "what is", "what's", "how does", "explain", "tell me about",
+            "what are", "define", "meaning of", "how do", "what exactly",
+            "can you explain", "i don't understand", "confused about",
+            "what does", "what counts as",
+        ],
+        "response_style": "educational",
+        "tone": "clear, no jargon, use examples",
+    },
+
+    "improve": {
+        "description": "User wants to raise their credit score",
+        "phrases": [
+    "improve", "raise", "increase", "build", "fix", "grow", "change my credit score",
+    "how do i fix", "how can i fix", "how do i improve", "how can i improve",
+    "how do i raise", "how can i raise",
+    "my credit is low", "low credit", "bad credit",
+    "help my credit", "help me fix my credit",
+    "what should i do to improve",
+    "how do i get my score up"
+],
+
+        "response_style": "action_plan",
+        "tone": "direct, step-by-step, prioritized by impact",
+    },
+
+    "diagnose": {
+        "description": "User wants to understand why something happened",
+        "phrases": [
+            "why did my score drop", "why did my credit go down",
+            "score decreased", "credit dropped", "why is my score lower",
+            "why did it go down", "what happened to my score",
+            "why was i denied", "why am i getting", "why can't i",
+            "what caused", "why is my credit",
+        ],
+        "response_style": "cause_and_effect",
+        "tone": "diagnostic, identify root cause first, then fix",
+    },
+
+    "decide": {
+        "description": "User is evaluating whether to take a specific action",
+        "phrases": [
+            "should i", "is it worth it", "is it bad to", "will it hurt",
+            "does this affect", "what happens if", "if i do this",
+            "good idea to", "bad idea to", "should i close",
+            "should i open", "should i apply", "should i pay off",
+            "is it okay to", "can i do", "would it help to",
+        ],
+        "response_style": "tradeoff_analysis",
+        "tone": "balanced, show pros and cons, give a clear recommendation",
+    },
+}
+
+# ===========================================================================
+# REASONING RULES
+# Maps intent + topic combinations to specific warnings, actions, tradeoffs
+# These fire INSIDE the response to make it feel personalized and smart
+# ===========================================================================
+
+REASONING_RULES: dict[str, dict] = {
+
+    # ── IMPROVE intent rules ──────────────────────────────────────────────
+    "improve:utilization": {
+        "priority": "HIGH",
+        "primary_action": "Pay down your highest-utilization card first.",
+        "secondary_action": "Request a credit limit increase (soft pull — no score impact).",
+        "warning": None,
+        "cause_effect": "Lowering utilization from 80% to 10% can add 50–80 points within one billing cycle.",
+        "timeframe": "1 billing cycle (30 days)",
+    },
+    "improve:payment_history": {
+        "priority": "HIGH",
+        "primary_action": "Set autopay for the minimum on every account immediately.",
+        "secondary_action": "If you have a recent late payment, call the lender and ask for a goodwill removal.",
+        "warning": "Never miss another payment — one 30-day late can drop a good score by 60–100 points.",
+        "cause_effect": "On-time payments compound over time. 24 months of clean history can outweigh one old late.",
+        "timeframe": "2–6 months for meaningful improvement",
+    },
+    "improve:building_credit": {
+        "priority": "HIGH",
+        "primary_action": "Open a secured credit card (Discover it Secured or Capital One Secured).",
+        "secondary_action": "Ask a trusted family member to add you as an authorized user on their oldest card.",
+        "warning": None,
+        "cause_effect": "A secured card + authorized user status can generate your first score within 3–6 months.",
+        "timeframe": "3–18 months for a good score",
+    },
+    "improve:credit_age": {
+        "priority": "MEDIUM",
+        "primary_action": "Keep your oldest card open. Put one small charge on it every 6 months.",
+        "secondary_action": "If the card has an annual fee, call and request a product change to a no-fee version.",
+        "warning": "Closing an old card can drop your average account age and hurt your score for years.",
+        "cause_effect": "Credit age makes up 15% of your score. Every account you close reduces your average.",
+        "timeframe": "Impact is slow — protect it now, don't try to fix it later",
+    },
+    "improve:credit_mix": {
+        "priority": "LOW",
+        "primary_action": "Don't pursue credit mix as a goal. Fix payment history and utilization first.",
+        "secondary_action": "If you want to add installment history, a credit-builder loan from a credit union costs $0 net.",
+        "warning": "Don't take on debt just to improve mix — it's only 10% of your score.",
+        "cause_effect": "Adding a credit-builder loan gives you installment history without real debt risk.",
+        "timeframe": "12 months to see full impact",
+    },
+
+    # ── DIAGNOSE intent rules ─────────────────────────────────────────────
+    "diagnose:utilization": {
+        "root_cause": "Your balance-to-limit ratio likely spiked above 30%.",
+        "fix": "Pay down the high-balance card before the statement closes — not the due date.",
+        "warning": "Utilization resets monthly. A drop this month means recovery next month.",
+        "cause_effect": "Going from 80% to under 10% utilization is often the fastest single score jump available.",
+    },
+    "diagnose:payment_history": {
+        "root_cause": "A payment hit 30+ days late and got reported to the bureaus.",
+        "fix": "Call the lender. First-time latest are often removed as goodwill with a single phone call.",
+        "warning": "Don't ignore it. The impact is strongest in the first 2 years but fades after.",
+        "cause_effect": "One late payment can drop a 780 score by 90–110 points. Recovery takes 12–24 months of clean history.",
+    },
+    "diagnose:hard_inquiry": {
+        "root_cause": "Multiple hard inquiries from credit applications hit your report recently.",
+        "fix": "Stop applying for new credit for 6 months. Each inquiry recovers after ~12 months.",
+        "warning": "Rate-shopping for the same loan type within 14–45 days counts as ONE inquiry. Use this.",
+        "cause_effect": "Each hard pull is about 5–10 points. Multiple in 30 days signals desperation to lenders.",
+    },
+    "diagnose:credit_age": {
+        "root_cause": "You likely closed an old account or opened several new ones, dropping your average age.",
+        "fix": "You can't reverse a closed account. Open as few new accounts as possible going forward.",
+        "warning": "Every new account lowers your average age. New accounts also trigger hard inquiries.",
+        "cause_effect": "Average age dropping from 8 years to 3 years can cost 20–40 points.",
+    },
+
+    # ── DECIDE intent rules ───────────────────────────────────────────────
+    "decide:close_card": {
+        "recommendation": "NO, don't close it.",
+        "pro": "Eliminates an annual fee, simplifies your wallet.",
+        "con": "Removes available credit (raises utilization), drops account age.",
+        "better_alternative": "Product-change to a no-fee version. Same account history. Zero cost.",
+        "cause_effect": "Closing a card you've had for 8 years drops your oldest account history entirely. ",
+    },
+
+
+    "decide:apply_card": {
+        "recommendation": "DEPENDS — check pre-approval first.",
+        "pro": "New card adds available credit, lowers overall utilization.",
+        "con": "Hard inquiry (5–10 point drop), new account lowers average age.",
+        "better_alternative": "Use pre-approval tools (soft pull) before committing to the hard pull.",
+        "cause_effect": "If approved, utilization drops. If denied, you took the inquiry hit with no benefit.",
+    },
+    "decide:pay_collections": {
+        "recommendation": "NEGOTIATE first — don't just pay.",
+        "pro": "Paying stops the collection process and shows good faith.",
+        "con": "Paying without negotiating may not remove the account from your report.",
+        "better_alternative": "Offer pay-for-delete in writing. Get agreement before paying.",
+        "cause_effect": "A paid collection still shows on your report. A deleted one disappears entirely.",
+    },
+    "decide:authorized_user": {
+        "recommendation": "YES — if the primary cardholder has good history.",
+        "pro": "Their entire history on that card gets added to your report. Instant credit age.",
+        "con": "If they miss a payment, it hurts your score too.",
+        "better_alternative": None,
+        "cause_effect": "One authorized user addition on a 10-year-old card can create a 680+ score from nothing.",
+    },
+}
+
+
+
+# ===========================================================================
+# FOLLOW-UP TRIGGER PHRASES
+# ===========================================================================
+
+FOLLOW_UP_TRIGGERS = {
+    # keep going
+    "tell me more", "elaborate", "go deeper", "keep going", "continue",
+    "go on", "and then", "keep talking", "dont stop", "go ahead",
+    "finish", "finish that thought", "finish what you were saying",
+    "keep it going", "dont stop there", "you were saying", "go",
+    "proceed", "and", "okay and", "ok and", "right and", "yeah and",
+    "so then what", "then what", "what happened next", "what comes next",
+
+    # explain this
+    "explain more", "explain it more", "explain some more",
+    "explain that", "explain this", "explain that again",
+    "break it down", "break this down", "break that down",
+    "in depth", "more in depth", "go in depth", "dive deeper",
+    "dive into that", "dig into that", "dig deeper", "unpack that",
+    "unpack this", "walk me through it", "walk me through that",
+    "spell it out", "spell that out", "lay it out", "lay it out for me",
+    "make it make sense", "help me understand", "help me understand this",
+    "help me understand that", "put it in plain english", "plain english",
+    "simplify that", "simplify this", "dumb it down", "eli5",
+    "explain it like im five", "explain it simply",
+
+    # I don't get it
+    "i dont understand", "i dont get this", "i dont get it",
+    "i dont even understand", "this is confusing", "im confused",
+    "what does that mean", "what do you mean", "whats that mean",
+    "can you clarify", "clarify that", "what does this mean",
+    "lost me", "you lost me", "say that again", "run that back",
+    "huh", "what", "come again", "say what", "wait what",
+    "wait", "hold on", "slow down", "back up", "back up a second",
+    "i missed that", "i got lost", "where did you lose me",
+    "that went over my head", "went over my head", "over my head",
+    "not following", "im not following", "i cant follow",
+    "i need more context", "give me context", "what context", "i'm confused",
+    "alright yeah im confused"
+                                                              
+
+    # give me more
+    "more about", "tell me about", "what else", "anything else",
+    "what else do you know", "i wanna know more", "i wanna know more about",
+    "tell me everything", "give me more", "more details", "more detail",
+    "what more", "whats more", "more on that", "more on this",
+    "keep going with that", "stay on that", "stay on this",
+    "lets stay on this", "lets stay on that", "dont change the subject",
+    "stick to that", "stick with that", "focus on that",
+    "go back to that", "go back to what you said", "what you said earlier",
+    "you mentioned", "you said", "earlier you said", "what did you mean by",
+    "what did you mean when you said",
+
+    # so what / why
+    "why", "how so", "why does it matter", "so what", "why does this matter",
+    "why is that", "why is this", "why though", "but why", "why exactly",
+    "what does that have to do with", "how does that affect me",
+    "why should i care", "why do i care", "what does that mean for me",
+    "how does that apply to me", "how does this apply to me",
+    "whats the point", "what is the point", "point being",
+    "what are you getting at", "where are you going with this",
+    "what does that tell me", "what does that mean for my credit",
+
+    # what do I do
+    "what should i do", "what now", "next step", "next steps",
+    "what do i do now", "what do i do next", "where do i go from here",
+    "what do i do with this", "how do i use this", "how do i apply this",
+    "how do i start", "where do i start", "what do i start with",
+    "first move", "what is my first move", "whats my move",
+    "what would you do", "what would you do in my position",
+    "if you were me", "if i were you", "what would you recommend",
+    "give me a recommendation", "just tell me what to do",
+    "tell me what to do", "just give me the steps",
+
+    # summary
+    "summarize this", "summarize that", "summarize this more",
+    "summary of this", "summary of this topic", "give me a summary",
+    "wrap it up", "tldr", "tl dr", "recap", "give me a recap",
+    "quick recap", "quick summary", "short version", "short summary",
+    "condense that", "condense this", "bottom line", "whats the bottom line",
+    "what is the bottom line", "cut to the chase", "just give me the gist",
+    "the gist", "key takeaway", "key takeaways", "main point",
+    "main points", "what do i need to know", "what should i remember",
+
+    # casual / gen z / conversational
+    "bro", "bruh", "no way", "wait fr", "fr though", "fasho",
+    "say less", "say more", "say more though", "keep it real",
+    "real talk", "lowkey confused", "lowkey lost", "highkey confused",
+    "im dead serious", "genuinely asking", "genuinely curious",
+    "not gonna lie i dont get it", "ngl i dont get it",
+    "this is going over my head ngl", "can u repeat that",
+    "can you repeat that", "one more time", "say it again",
+    "hit me again", "run it back", "run it back one more time", "yo what u mean"
+    "what u mean", "what is u sayin", "what is u sayin", "what is r u sayin", "alright im confused"
+
+}
+
+
+# ===========================================================================
+# CREDIT KNOWLEDGE BASE
+# ===========================================================================
+
+CREDIT_KNOWLEDGE = {
+
+"credit_score_basics": {
+    "keywords": [],
+    "response": (
+        "A credit score, or FICO score, is a 3-digit number that tells lenders how risky it is to lend you money.\n\n "
+        "The number ranges  tend to be around 300 to 850.\n"
+        "Higher score = lower risk.\n"
+        "Lower score = higher risk.\n\n"
+        "Your credit score affects:\n"
+        "• Loan approvals\n"
+        "• Interest rates\n"
+        "• Apartment approvals\n"
+        "• Credit card approvals\n\n"
+        "It is mainly built from payment history, utilization, credit age, new credit, and credit mix."
+        "This is why you should always try to set up a auto pay system to pay on time, if you want me to explain more just ask. "
+
+    ),
+    "elaboration": (
+        "here's the more in depth explanation, I want you to think of your credit score like a trust score for borrowing money.\n\n "
+        "If you borrow and pay back on time, your score goes up.\n"
+        "If you miss payments or max out cards, it goes down.\n\n"
+        "The system is simple once you know the 5 factors."
+
+    ),
+},
+
+
+    "general_credit": {
+        "keywords": [],
+        "response": (
+            "I didn't quite understand the idea you posed, but most credit score changes come from a few major factors:\n\n"
+            "• Payment history\n"
+            "• Credit utilization\n"
+            "• Length of credit history\n"
+            "• New credit / hard inquiries\n"
+            "• Credit mix\n\n"
+            "The reason you'd see this response is because what you entered doesn't match anything in my specialized domain of credit, please check the spelling of your input so that I can give you the best response."
+            "To push you towards your credit goals. "
+            "Thank you. "
+            "(NOTE: The information provided is a list of most common credit changes, please refer to research before prescribing yourself with these ideas) "
+
+
+        ),
+        "elaboration": (
+            "Alright here's a clear break down of why your score potentially dropped, it’s usually because of high utilization, "
+            "a missed payment, or a recent hard inquiry.\n\n"
+            "If you want to improve your score, focus first on:\n"
+            "• paying on time\n"
+            "• keeping balances low\n"
+            "• avoiding unnecessary applications\n"
+        ),
+    },
+
+    "score_ranges": {
+        "keywords": [
+            "what score", "my score", "score range", "what is a good credit score",
+            "what number", "800", "700", "600", "500", "excellent",
+            "good credit", "bad credit", "fair credit", "poor credit",
+            "exceptional", "very good",
+        ],
+        "response": (
+            "📊 Credit score ranges — 300 to 850:\n\n"
+            " The range 800–850 is considered Exceptional (~28% of Americans)\n"
+            "   Best rates on everything. Lenders compete for you.\n\n"
+            " The range 740–799 is considered Very Good (~27.5% of Americans)\n"
+            "   Near-best rates. Minor difference from Exceptional.\n\n"
+            " The range 670–739 is considered Good (~20.4% of Americans)\n"
+            "   Approved for most things. Room to improve rates.\n\n"
+            " The range 580–669 is considered Fair (~14.9% of Americans)\n"
+            "   Approved but at higher rates. Worth improving.\n\n"
+            "The range 300–579 is very often considered poor Poor (~14.2% of Americans)\n"
+            "   Difficult approvals. Higher deposits required.\n\n"
+            "The average FICO score in 2025 is about 715.\n"
+            "A 760 gives you the same benefits as an 840, if you have anything "
+            "beyond that, you're optimizing for bragging rights."
+            "(NOTE: Take this information is not official, results may vary.) "
+        ),
+        "elaboration": (
+            "Alright, buckle up heres a clear break down. the number matters in real dollars:\n\n"
+            "Same $300k mortgage, two different scores:\n"
+            "• 760 → 6.5% rate → $1,896/month\n"
+            "• 620 → 8.5% rate → $2,306/month\n\n"
+            "$410 more every single month.\n"
+            "$4,920 more every year.\n"
+            "$147,600 more over 30 years.\n\n"
+            "Same house. Same loan. Just a different three-digit number.\n\n"
+            "Small increments matter — moving from 680 to 720 unlocks better "
+            "borrowing tiers even before you hit 760."
+        ),
+    },
+
+    "five_factors": {
+        "keywords": [
+            "how is it calculated", "what affects", "what impacts",
+            "factors", "five factors", "payment history",
+            "length of history", "credit mix", "new credit", "inquiries",
+            "35 percent", "30 percent", "how much should i spend on my card",
+            "how long is my history",
+        ],
+        "response": (
+            "Your credit score is built from 5 factors:\n\n"
+            "1. Payment History — 35%\n"
+            "   Pay on time, every time.\n\n"
+            "2. Credit Utilization — 30%\n"
+            "   How much of your limit you're using. Under 10% is ideal.\n\n"
+            "3. Length of Credit History — 15%\n"
+            "   Older accounts help. Never close your oldest card.\n\n"
+            "4. Credit Mix — 10%\n"
+            "   Different types (card + loan) helps slightly.\n\n"
+            "5. New Credit — 10%\n"
+            "   Too many applications in a short time = red flag.\n\n"
+            "Focus on #1 and #2 first — they're 65% combined."
+        ),
+        "elaboration": (
+            "Here's the in-depth strategy on how to use this strategically:\n\n"
+            "Payment history is binary — on time or not.\n"
+            "Set autopay for the minimum on everything. Never miss.\n\n"
+            "Utilization you can change this month:\n"
+            "• Pay balances before the statement closes\n"
+            "• Request a credit limit increase (soft pull)\n"
+            "• Both lower your ratio immediately\n\n"
+            "Length of history is time — protect it, can't speed it.\n"
+            "Credit mix and new credit — don't chase them. They follow naturally."
+        ),
+    },
+
+    "payment_history": {
+        "keywords": [
+            "payment history", "on time", "late payment", "missed payment",
+            "pay on time", "autopay", "missed", "delinquent", "30 days",
+            "60 days", "90 days", "collections",
+        ],
+        "response": (
+            "Payment history is 35% of your score. The single biggest factor.\n\n"
+            "One missed payment at 30 days late:\n"
+            "• Can drop a good score by 60–100 points\n"
+            "• Stays on your report for 7 years\n"
+            "• Affects you most in the first 2 years\n\n"
+            "The permanent fix:\n"
+            "Set autopay for the minimum on every account.\n"
+            "The autopay catches you if you forget.\n"
+            "Pay the actual balance manually whenever you want."
+        ),
+        "elaboration": (
+            "Here's the optimal plan if you have late payments:\n\n"
+            "Call the lender first.\n"
+            "First-time latest are often removed as goodwill — just ask.\n"
+            "Works more often than people realize.\n\n"
+            "Time helps automatically:\n"
+            "• After 2 years the impact fades significantly\n"
+            "• After 7 years it falls off entirely\n\n"
+            "On-time payments going forward dilute the damage.\n"
+            "Every month of clean history improves the ratio."
+        ),
+    },
+
+    "credit_freeze": {
+        "keywords": [
+            "credit freeze", "freeze credit", "security freeze",
+            "unfreeze", "thaw credit", "lift freeze",
+            "identity theft protection", "credit bureau",
+            "what is credit freeze", "what is credit freezing",
+        ],
+        "response": (
+            "A credit freeze blocks anyone from opening new accounts in your name.\n\n"
+            "Why it matters:\n"
+            "• Strongest protection against identity theft\n"
+            "• Does NOT affect your existing accounts or score\n"
+            "• Free at all 3 bureaus. Always.\n\n"
+            "How to freeze:\n"
+            "• Experian — online or 888-397-3742\n"
+            "• Equifax — online or 888-298-0045\n"
+            "• TransUnion — online or 800-916-8800\n\n"
+            "Online freeze activates within 1 business day.\n"
+            "You can unfreeze temporarily for loan applications.\n"
+            "Freeze, thaw, and refreeze as many times as you want."
+        ),
+        "elaboration": (
+            "Alright, more in depth on what freeze vs lock means, so your question might be what's the difference:\n\n"
+            "Credit freeze: free by law, managed through bureaus, strongest protection.\n"
+            "Credit lock: usually costs money, managed through bureau apps, more convenient.\n\n"
+            "For most people: freeze wins. It's free and equally effective.\n\n"
+            "Activation timelines:\n"
+            "• Online/phone → 1 business day\n"
+            "• Mail → 3 business days\n\n"
+            "Unfreezing for a specific creditor:\n"
+            "You can lift temporarily for a date range or for a specific lender.\n"
+            "Online unfreezing typically takes 1 hour.\n\n"
+            "You can also freeze your child's credit at all 3 bureaus.\n"
+            "Highly recommended if they're under 18."
+        ),
+    },
+
+    "utilization": {
+        "keywords": [
+            "utilization", "credit utilization", "balance", "limit",
+            "how much to use", "30 percent rule", "maxed out",
+            "high balance", "credit usage", "ratio", "utili",
+        ],
+        "response": (
+            "Utilization is how much of your credit limit you're actually using.\n\n"
+        "Simple math: $300 balance on a $1,000 limit = 30% utilization.\n\n"
+        "It makes up 30% of your credit score — second biggest factor.\n\n"
+        "Impact by range:\n"
+        "• Under 10% — Ideal. Maximizes your score.\n"
+        "• 10–29% — Fine. Minimal damage.\n"
+        "• 30–49% — Starts hurting.\n"
+        "• 50%+ — Significant damage.\n"
+        "• 90%+ — Severe. Looks desperate to lenders.\n\n"
+        "The good news: it resets every month. "
+        "Pay it down and your score recovers within one billing cycle."
+        ),
+        "elaboration": (
+            "For you these are the three ways to lower your personal utilization without paying off debt:\n\n"
+            "1. Pay before the statement closes — not just the due date.\n"
+            "   Bureaus see your statement balance, not your real-time balance.\n\n"
+            "2. Request a credit limit increase.\n"
+            "   Same balance, higher limit = lower ratio. Usually a soft pull.\n\n"
+            "3. Spread spending across multiple cards.\n"
+            "   $500 on one $600 card = 83%. $250 each on two = 42% each.\n"
+            "   Same spending. Very different score impact."
+        ),
+    },
+
+    "build_from_zero": {
+        "keywords": [
+            "no credit", "build credit", "start credit", "first credit card",
+            "no credit history", "thin file", "never had credit",
+            "how to start", "beginning", "from scratch", "from zero",
+            "authorized user", "secured card",
+        ],
+        "response": (
+            "Building credit from zero, here are the things to think about:\n\n"
+            " - Always have a secured credit card\n"
+            " - Step 2: Limit how much you spend each month on your card so that you can have one small charge per month\n"
+            " - Set up an autopay feature so that you can pay off the card in full every month.\n"
+            "Estimated timeline: first score in 3–6 months. Good score in 12–18."
+        ),
+        "elaboration": (
+            "Alright,if you want the quicker way to build your credit you've got it. Start off by finding by becoming a authorized user:\n\n"
+            "If someone you trust has:\n"
+            "• A card open 5+ years\n"
+            "• Low utilization\n"
+            "• Perfect payment history\n\n"
+            "Ask them to add you as an authorized user.\n"
+            "You don't need to use or even hold the card.\n"
+            "Their history gets added to your report immediately.\n\n"
+            "This can generate a 700+ score with zero credit history of your own.\n\n"
+            "Best move: authorized user + your own secured card simultaneously.\n"
+            "Two tracks building at once."
+        ),
+    },
+
+    "hard_inquiry": {
+        "keywords": [
+            "hard inquiry", "soft inquiry", "hard pull", "soft pull",
+            "applying for credit", "credit check", "inquiry",
+            "does applying hurt", "pre approval",
+        ],
+        "response": (
+            "Two types of credit checks — very different impact:\n\n"
+            "Soft inquiry — zero score impact\n"
+            "• Checking your own credit\n"
+            "• Pre-approval offers\n"
+            "• Background checks by employers\n"
+            "Do these freely. Nothing happens.\n\n"
+            "Hard inquiry — small, temporary drop\n"
+            "• Applying for cards or loans\n"
+            "• Some apartment applications\n"
+            "Usually 5–10 points. Recovers in a few months.\n"
+            "Stays on report 2 years but impacts score for ~1 year."
+        ),
+        "elaboration": (
+            "Okay, here's your smart inquiry strategy:\n\n"
+            "Rate shopping rule:\n"
+            "Multiple hard pulls for the same loan type within 14–45 days\n"
+            "= ONE inquiry. Shop rates aggressively — it won't hurt more than once.\n\n"
+            "Application spacing:\n"
+            "Space credit card applications 6+ months apart.\n\n"
+            "Pre-approval first:\n"
+            "Most major issuers let you check pre-approval with a soft pull.\n"
+            "Find likely approvals before committing to the hard pull."
+        ),
+    },
+
+    "credit_mix": {
+        "keywords": [
+            "credit mix", "types of credit", "installment loan",
+            "revolving credit", "different accounts", "loan and card",
+        ],
+        "response": (
+            "Credit mix = having different types of credit accounts.\n"
+            "Worth 10% of your score.\n\n"
+            "Two main types:\n"
+            "• Revolving — credit cards\n"
+            "• Installment — loans (car, student, personal)\n\n"
+            "Having both shows you can manage different debt types.\n\n"
+            "Important: don't take on debt just to improve mix.\n"
+            "Fix payment history and utilization first.\n"
+            "Let mix improve naturally."
+        ),
+        "elaboration": (
+            "If you only have credit cards and want to add installment history:\n\n"
+            "A credit-builder loan from a credit union is the safest move.\n"
+            "$500–1,000 over 12 months. You pay monthly.\n"
+            "They hold the money and release it at the end.\n"
+            "It's a savings account and credit builder in one — zero real debt risk.\n\n"
+            "Don't pursue mix aggressively.\n"
+            "At 10% of your score, the return is small compared to utilization and payments."
+        ),
+    },
+
+    "credit_age": {
+        "keywords": [
+            "length of history", "credit age", "oldest account",
+            "close a card", "how long", "average age", "credit history age",
+        ],
+        "response": (
+            "Length of credit history = 15% of your score.\n\n"
+            "What matters:\n"
+            "• Age of your oldest account\n"
+            "• Age of your newest account\n"
+            "• Average age of all accounts\n\n"
+            "The one unbreakable rule: never close your oldest card.\n\n"
+            "Even if you don't use it.\n"
+            "Even if it has no rewards.\n"
+            "Even if there's an annual fee — negotiate to downgrade it first.\n\n"
+            "Closing it can damage your average age for years."
+        ),
+        "elaboration": (
+            "Protecting credit age long term:\n\n"
+            "Old card, no annual fee:\n"
+            "Put one small charge on it every 6 months. Pay immediately.\n"
+            "Keeps it active. Issuer won't close for inactivity.\n\n"
+            "Old card with annual fee you don't want:\n"
+            "Call and ask for a product change to a no-fee version.\n"
+            "You keep the account history. The fee disappears.\n\n"
+            "Time is the only builder here. You can't speed it up.\n"
+            "You can only protect what you have."
+        ),
+    },
+
+    "check_credit": {
+        "keywords": [
+            "check my credit", "see my score", "free credit report",
+            "annual credit report", "credit karma", "experian",
+            "where to check", "how to check", "monitor", "how do I view my credit",
+            "how do I check my credit", "check my FICO score", "check my fico score"
+        ],
+        "response": (
+            "How to check your credit — free, no strings:\n\n"
+            "Full reports (free, once per year per bureau):\n"
+            "annualcreditreport.com — official government site.\n"
+            "All 3 bureaus. No card required. Actually free.\n\n"
+            "Score monitoring (free, ongoing):\n"
+            "• Credit Karma — weekly updates, soft pull only (no score impact)\n"
+            "• Experian free tier — monthly updates\n"
+            "• Your bank or card app — many show FICO score\n\n"
+            "Checking your own credit never hurts your score. Check often."
+        ),
+        "elaboration": (
+            "What to look for when you check:\n\n"
+            "1. Errors — more common than you'd think.\n"
+            "Wrong payment history, wrong balances, accounts you don't recognize.\n"
+            "Dispute directly at the bureau's website. By law: 30-day response.\n\n"
+            "2. Identity theft signs.\n"
+            "Accounts you didn't open. Inquiries you didn't authorize.\n"
+            "Catch early — the longer it goes, the harder to fix.\n\n"
+            "3. Which card is dragging utilization down.\n"
+            "That's the one to pay first.\n\n"
+            "Freeze your credit at all 3 bureaus when not actively applying.\n"
+            "Free. Stops anyone from opening accounts in your name."
+        ),
+    },
+
+    "secured_card": {
+        "keywords": [
+            "secured card", "secured credit card", "unsecured",
+            "deposit", "collateral", "graduate", "upgrade card",
+        ],
+        "response": (
+            "Secured vs unsecured credit cards:\n\n"
+            "Secured:\n"
+            "• You deposit $200–500 as collateral\n"
+            "• That deposit = your credit limit\n"
+            "• Reports to all 3 bureaus exactly like a regular card\n\n"
+            "Unsecured:\n"
+            "• No deposit required\n"
+            "• Requires some credit history to get approved\n\n"
+            "Start secured → build history → graduate to unsecured.\n"
+            "Most secured cards upgrade automatically after 12–18 months."
+        ),
+        "elaboration": (
+            "Best secured cards right now:\n\n"
+            "Discover it Secured:\n"
+            "• No annual fee\n"
+            "• 2% cash back at gas/restaurants, 1% elsewhere\n"
+            "• Auto-review for upgrade at 7 months\n\n"
+            "Capital One Secured Mastercard:\n"
+            "• No annual fee\n"
+            "• $49, $99, or $200 deposit for $200 limit\n"
+            "• Auto-upgrade review\n\n"
+            "Both report to all 3 bureaus.\n"
+            "One charge per month. Full payment autopay. Let it build."
+        ),
+    },
+
+    "credit_repair": {
+        "keywords": [
+            "fix my credit", "repair credit", "bad credit", "negative items",
+            "collections", "charge off", "dispute", "remove",
+            "credit repair company", "pay for delete",
+        ],
+        "response": (
+            "Credit repair — what actually works:\n\n"
+            "Dispute errors (free, actually effective):\n"
+            "Wrong info can be removed. File at each bureau's website.\n"
+            "By law they must respond within 30 days.\n\n"
+            "Goodwill letters (free, worth trying):\n"
+            "One late payment on a long on-time history?\n"
+            "Write to the lender. Ask for removal. Works more than people expect.\n\n"
+            "Time (free, guaranteed):\n"
+            "Negative items fall off after 7 years.\n"
+            "Impact fades significantly after 2 years.\n\n"
+            "Credit repair companies: skip them.\n"
+            "They do nothing you can't do yourself for free."
+        ),
+        "elaboration": (
+            "Pay for delete — when and how:\n\n"
+            "If a debt is in collections:\n"
+            "Offer to pay in exchange for the collector removing the entry.\n"
+            "Not guaranteed — but works sometimes.\n"
+            "Get the agreement in writing BEFORE you pay.\n\n"
+            "Settlement vs pay in full:\n"
+            "Settled = 'settled for less than owed' on report.\n"
+            "Paid in full shows better — both stop the clock.\n\n"
+            "Statute of limitations:\n"
+            "Very old debt (5–7+ years) may be past the legal collection window.\n"
+            "Research before paying — paying can restart the clock in some states.\n\n"
+            "When in doubt: consult a nonprofit credit counselor. Free. No selling."
+        ),
+    },
+}
+
+# Beginner response code logic
+BEGINNER_CARD_RESPONSE = (
+    "Great question — and most people mess this up by picking the wrong card early.\n\n"
+
+    "It all starts with one question: what's your current credit range?\n\n"
+
+    "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "No credit / thin file (300–579)\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "Discover it Secured — best starter card on the market\n"
+    "  • No annual fee\n"
+    "  • 2% cash back at gas & restaurants, 1% everywhere else\n"
+    "  • Auto-upgrade review at 7 months\n"
+    "  • Reports to all 3 bureaus\n\n"
+    "Capital One Secured — good backup\n"
+    "  • Deposit as low as $49\n"
+    "  • No annual fee\n"
+    "  • Auto-upgrade review after consistent on-time payments\n\n"
+
+    "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "Fair credit (580–669)\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "Discover it Student — if you're a student, this is the move\n"
+    "  • No annual fee\n"
+    "  • Same cash back structure as the secured\n"
+    "  • No hard pull for pre-approval check\n\n"
+    "Capital One Quicksilver Student\n"
+    "  • 1.5% cash back on everything\n"
+    "  • No annual fee\n"
+    "  • Good stepping stone to the full Quicksilver\n\n"
+
+    "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "Good credit (670+)\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "Chase Freedom Unlimited\n"
+    "  • 1.5% on everything, 3% on dining and drugstores\n"
+    "  • No annual fee\n"
+    "  • Pairs well with other Chase cards later\n\n"
+    "Capital One Quicksilver\n"
+    "  • Flat 1.5% on everything, simple and clean\n"
+    "  • No annual fee\n\n"
+
+    "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "Rules that matter more than which card you pick\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "  • No annual fee until you hit 740+ — rewards never justify it early\n"
+    "  • Avoid store cards — low limits hurt your utilization\n"
+    "  • One card, small purchases, paid in full every month\n"
+    "  • The best card is the one you'll actually manage responsibly\n\n"
+
+    "What's your current score range? I'll narrow it down to one specific card."
+)
+
+
+# ===========================================================================
+# CREDIT AUDIOBOOKS
+# ===========================================================================
+
+CREDIT_AUDIOBOOKS = [
+    {
+        "id": "JNL7ZsfKD_4",
+        "title": "How you can raise your current credit score",
+        "url": "https://www.youtube.com/watch?v=JNL7ZsfKD_4",
+        "focus": ["raise", "improve", "increase"],
+    },
+    {
+        "id": "qu47ulGpHDo",
+        "title": "How to build your credit score from 0 to 800",
+        "url": "https://www.youtube.com/watch?v=qu47ulGpHDo",
+        "focus": ["build", "start", "beginning", "zero", "no credit", "first time"],
+    },
+    {
+        "id": "3k0ObI4OBbY&t=61s",
+        "title": "DAVE RAMSEY explains how you can build your credit score",
+        "url": "https://www.youtube.com/watch?v=3k0ObI4OBbY&t=61s",
+        "focus": ["grow", "learn", "foundation", "teach", "educate"]
+
+    }
+]
+
+CREDIT_VIDEO_TRIGGERS = {
+    "JNL7ZsfKD_4": {
+        "concepts": ["credit score", "utilization", "payment", "fico", "bureau", "report", "raise", "improve"],
+        "action_prompt": (
+            "You just learned what actually moves your credit score. "
+            "Check yours free at annualcreditreport.com — no card, no strings. "
+            "Once you know your number, come back and I'll tell you which lever to pull first."
+        ),
+        "action_type": "credit_check_nudge",
+    },
+    "qu47ulGpHDo": {
+        "concepts": ["secured card", "build", "history", "score", "800", "zero", "no credit", "authorized user"],
+        "action_prompt": (
+            "You just learned the path from 0 to 800. "
+            "The first step: a secured card with one recurring charge, paid in full monthly. "
+            "Do you have one yet? Tell me where you're starting."
+        ),
+        "action_type": "credit_action",
+    },
+
+    "3k0ObI4OBbY&t=61s": {
+        "concepts": ["fico score", "money", "income", "credit check"],
+        "action_prompt": (
+            "You just witnessed the deeper understanding of a fico score, and the strategies Dave Ramsey uses"
+            "to increase your credit score. "
+        ),
+        "action_type": "credit_action",
+    }
+
+}
+
+
+# ===========================================================================
+# EMOTIONAL SIGNALS + OPENERS
+# ===========================================================================
+
+CREDIT_EMOTIONAL_SIGNALS = {
+    "stressed": [
+        "my credit is terrible", "my credit is bad", "ruined my credit",
+        "collections", "scared", "worried about my credit",
+        "can't get approved", "denied", "rejection", "embarrassing",
+        "ashamed", "messed up", "made a mistake",
+    ],
+    "starting_out": [
+        "never had credit", "no credit", "just starting",
+        "first credit card", "where do i begin", "don't know where to start",
+        "new to credit", "just turned 18", "first time",
+    ],
+    "motivated": [
+        "want to improve", "want to build", "trying to get",
+        "working on", "want 700", "want 750", "want 800",
+        "goal is", "trying to buy a house", "trying to get a car",
+    ],
+    "confused": [
+        "don't understand", "confused", "doesn't make sense",
+        "how does", "why did", "what does it mean",
+        "can you explain", "lost",
+    ],
+}
+
+
+
+
+# Look into how credit openers is actually operating within my program.
+CREDIT_OPENERS = {
+    "stressed": [
+        "First, credit damage is repairable. All of it. Let's look at exactly where you are.\n\n",
+        "That's a stressful place to be, and you're not alone. Here's what actually moves the needle.\n\n",
+        "Bad credit isn't permanent. It's a position, not a sentence. Here's the path out.\n\n",
+    ],
+    "starting_out": [
+        "Starting from zero is the cleanest place to begin — no damage to undo. Here's the path.\n\n",
+        "No credit history means no bad habits. You're building on a blank slate.\n\n",
+        "Everyone with great credit started exactly where you are. Here's what they did.\n\n",
+    ],
+    "motivated": [
+        "That energy is exactly what gets results. Let's build a real strategy around your goal.\n\n",
+        "Good. Motivation + the right moves = real score improvement. Here's what to focus on.\n\n",
+        "",
+    ],
+    "confused": [
+        "Credit can feel like a black box — let's crack it open.\n\n",
+        "Totally understandable. Credit is confusing on purpose. Here's the clear version.\n\n",
+        "",
+    ],
+}
+
+CREDIT_OPENING_PROMPTS = [
+    (
+        "Hey, welcome to credit mode. 💳\n\n"
+        "I'm here for one thing: helping you understand and master your credit score.\n\n "
+        "Whether you're starting from zero, trying to push past 700, or dealing with damage "
+        "you want to fix. To start off ask me how you can build you credit score, or any key "
+        "credit score terms that are confusing to you (type 'back' to exit a loop) "
+    ),
+    (
+        "Credit score mode, let's get to work. 💳\n\n"
+        "Your credit score touches your mortgage rate, car loan, apartment approval, "
+        "and sometimes even your job application.\n\n"
+        "What do you want to work on? I suggest asking how to build your credit score "
+        "or any credit score terms that are confusing to you. (type 'back' to exit a loop)",
+    ),
+    (
+        "You just opened the most underrated part of personal finance. 💳\n\n "
+        "Tell me where you're starting. I think building your credit score is the best idea."
+        "Also if there are any credit score terms that are confusing to you please let me know. "
+        "(type 'back' to exit a loop) "
+    ),
+    (
+        "Welcome to the one and only credit mode you'll ever need, I'm WRIN. 💳 \n\n "
+        "The main purpose of you being here is so you can advance positively in the credit direction"
+        "lets get started, please ask me how you can build your credit score. "
+        "Or you can ask the definition of any key credit score terms that are confusing to you. "
+        "(type 'back' to exit a loop) "
+    ),
+]
+
+
+def handle_user_greeting(text: str) -> bool:
+    return text.strip() in GREETING_TRIGGERS
+
+
+# UI handler to display the dict data for the visual graph.
+def generate_score_projection(current_score, topic, scenario_key):
+    ranges = SCORE_SIMULATION_RANGES[topic]["improvement_ranges"][scenario_key]
+    timeline = SCORE_SIMULATION_RANGES[topic]["timeline_months"]
+
+    projection = [{"month": 0, "low": current_score, "high": current_score}]
+
+    running_low = current_score
+    running_high = current_score
+
+    for i, month in enumerate(timeline):
+        low_gain, high_gain = ranges[i]
+        running_low = min(850, running_low + low_gain)
+        running_high = min(850, running_high + high_gain)
+        projection.append({
+            "month": month,
+            "low": running_low,
+            "high": running_high,
+            "label": f"Month {month}"
+        })
+
+    return projection
+
+
+
+
+
+#Appreciation handler logic if the user decides to show recognition for WRIN
+def is_appreciation(text):
+    triggers = ["thanks", "thank you", "appreciate it", "got it", "thanks bruh", "appreciate it", "preciate it", "TY", "ty", "thank u",]
+    text = text.lower()
+    return any(t in text for t in triggers)
+
+
+# appreciation prefix handler
+def get_appreciation_prefix():
+    return random.choice(APPRECIATION_RESPONSES)
+
+
+# projection handler
+def is_projection(text):
+    text = text.lower()
+
+    # \b creates a word boundary so "if" doesn't match "gift"
+    # we use a pipe | to join all keywords into one search
+    # Bucket A: The "When/Future" signals
+    future_signals = ["how long", "what will", "predict", "estimate", "projection", "timeline", "how fast"]
+
+    # Bucket B: The "Score/Growth" signals
+    growth_signals = ["score", "grow", "results", "improve", "benefit", "look like"]
+
+    # The Logic: If it has one from both, trigger projection
+    has_future = any(f in text for f in future_signals)
+    has_growth = any(g in text for g in growth_signals)
+
+    return has_future and has_growth
+
+
+# Check the collection questions to see if they've been asked or answered before.
+def get_next_collection_question(session):
+
+    # If the key is not in the current session return it so that the question can be asked.
+    for key in COLLECTION_FLOW:
+        if key not in session:
+            return key, COLLECTION_QUESTIONS[key]
+
+    return None, None
+
+
+
+# Various function handlers
+def check_beginner_card_trigger(text: str) -> bool:
+    text_lower = text.lower().strip()
+    return any(trigger in text_lower for trigger in BEGINNER_CARD_TRIGGERS)
+
+
+def credit_response(text):
+    return {"response": text, "mode": "credit"}
+
+# Match any of the users questions to a topic in credit_knowledge
+
+def match_credit_knowledge(text):
+    text =text.lower()
+
+    for topic, data in CREDIT_KNOWLEDGE.items():
+        for keyword in data.get("keywords", []):
+            if keyword in text:
+                return topic
+    return None
+
+
+# ===========================================================================
+# Helper functions to help WRIN run more efficiently
+# ===========================================================================
+
+def format_plan(plan: dict) -> str:
+    lines = []
+
+    for i, step in enumerate(plan.get("steps", []), 1):
+        if isinstance(step, dict):
+            lines.append(f"Step {i}: {step['title']}")
+            lines.append(f"   {step['detail']}")
+            lines.append("")
+        else:
+            lines.append(f"Step {i}: {step}")
+
+    if plan.get("timeline"):
+        lines.append(f"\nHere's the timeline: {plan['timeline']}")
+
+    for warning in plan.get(" Next some things to be wary of", []):
+        lines.append(f"\n⚠ {warning}")
+
+    return "\n".join(lines)
+
+
+
+def get_clarify_question(intent, topic, session):
+    tree = CLARIFY_TREE.get(intent, {}).get(topic)
+
+    if not tree:
+        return None
+
+    asked = session.get("clarify_asked", [])
+
+    for key, question in tree:
+        if key not in asked:
+            session.setdefault("clarify_asked", []).append(key)
+            return key, question
+
+    return None
+
+def detect_goal(text):
+    text = text.lower()
+    for goal, words in GOAL_KEYWORDS.items():
+        for w in words:
+            if w in text:
+                return goal
+    return None
+
+
+# ===========================================================================
+# Handle the credit response.
+# ===========================================================================
+
+def handle_credit_path(path):
+
+    if path == "no_credit":
+        return {
+            "response": (
+                "Alright, since you don’t have a credit card yet, your goal is to build credit from scratch.\n\n"
+                "Here’s the plan:\n"
+                "• Open a starter credit card (student or secured card)\n"
+                "• Put 1 bill that you can currently play off in time ( some examples include gas or Spotify)\n"
+                "• Turn on autopay\n"
+                "• Keep balance under 30% of the limit\n"
+                "• Check back in officially in 6 months to see how your credit score is doing\n\n "
+                "For someone starting from zero, this choice of action taken with caution should build you towards good credit. "
+            ),
+            "mode": "credit"
+        }
+
+    if path == "high_utilization":
+        return {
+            "response": (
+                "Your score is likely being hurt by high utilization.\n\n"
+                "Plan:\n"
+                "• Pay balances down below 30%\n"
+                "• Under 10% is even better\n"
+                "• You don’t need to close cards\n"
+                "• Just lower the balance and your score should rise"
+            ),
+            "mode": "credit"
+        }
+
+    if path == "late_payment":
+        return {
+            "response": (
+                "Late payments hurt your score a lot.\n\n"
+                "Plan:\n"
+                "• Set up autopay immediately\n"
+                "• Bring account current\n"
+                "• Time will repair this — late payments hurt less after 12–24 months"
+            ),
+            "mode": "credit"
+        }
+
+    # fallback
+    return {
+        "response": "Tell me a little more about your situation so I can give you the right plan.",
+        "mode": "credit"
+    }
+
+# Helper function
+def get_next_question_text(key):
+    questions = {
+        "has_credit_card": "Okay lets get to the root of this issue. The first question I'll ask is do you currently have any credit cards active?",
+        "missed_payments": "Have you missed any payments in the last 12 months for any reason at all?",
+        "high_utilization": "Is your current credit balance above 30% of your limit the credit agency gave you?",
+        "collections": "Do you have any collections that the credit agency has applied to your credit report?"
+    }
+    return questions.get(key, "Tell me more.")
+
+# Instead of the old DECISION TREE logic we determine what signal from the user is missing and evaluate from there.
+def get_next_missing_signal(session):
+    required = ["credit_score", "has_credit_card", "high_utilization", "missed_payments", "collections"]
+    signals = session.get("signals", {})
+
+    for key in required:
+        if key not in signals:
+            return key
+
+    return None
+
+
+# Map the profile using a specific value to get the best formatted answer.
+def diagnose_profile(session):
+    s = session.get("signals", {})
+
+    scores = {
+        "build_from_zero": 0,
+        "utilization": 0,
+        "payment_history": 0,
+        "collections_first": 0,
+        "optimization": 0
+    }
+
+    if s.get("has_credit_card") == "no":
+        scores["build_from_zero"] += 3
+
+    if s.get("high_utilization") == "yes":
+        scores["utilization"] += 3
+
+    if s.get("missed_payments") == "yes":
+        scores["payment_history"] += 3
+
+    if s.get("collections") == "yes":
+        scores["collections_first"] += 4
+
+    score = s.get("credit_score")
+
+    if score is not None:
+        if score < 580:
+            scores["build_from_zero"] += 3
+            scores["payment_history"] += 2
+
+
+        elif score < 670:
+            scores["utilization"] += 2
+            scores["payment_history"] += 2
+
+        elif score < 740:
+            scores["optimization"] += 3
+
+        else:
+            scores["optimization"] += 2
+
+    return max(scores, key=scores.get)
+
+
+
+
+
+
+
+# Clarification logic
+def handle_clarification_state(text: str, session: dict) -> dict:
+    session.setdefault("signals", {})
+
+
+    current_question = session.get("clarifying_question")
+
+    # Handle answer
+    if current_question == "credit_score":
+        if session.get("score_shared"):
+            session["signals"]["credit_score"] = session["score_shared"]
+        else:
+            score = _extract_credit_score(text)
+            if score:
+                session["signals"]["credit_score"] = score
+                session["score_shared"] = score
+
+            else:
+                return {"response": "just type your response for example something like (650) would work, and I can know exactly where your starting point is!"}
+
+        session["clarifying_question"] = None
+
+        pending = session.pop("pending_question", None)
+
+        if pending:
+            session["clarifying_question"] = pending
+
+            return {
+
+                "response": "Great, I've got your credit score is locked in, which will help me towards building the optimal plan for you. Are you ready to move on? ",
+                "mode": "credit",
+            }
+
+
+
+
+    elif current_question in("has_credit_card", "missed_payments", "high_utilization", "collections"):
+        yes_or_no = normalize_yes_no(text)
+
+
+
+        if yes_or_no is None:
+
+            return {
+
+                "response": "Just entering yes or no works fine for me! ",
+                "mode": "credit",
+
+                        }
+
+
+
+
+
+
+        session["signals"][current_question] = yes_or_no
+        session["clarifying_question"] = None
+
+
+        if current_question == "has_credit_card" and yes_or_no == "no":
+            session["current_question"] = "collections"
+            session.setdefault("signals", {})["has_credit_card"] = "no"
+
+
+            # Remember to ask the credit score question before switching to collection questions.
+            session["pending_question"] = "collections"
+
+            return {
+                "response": "Got it. Since you don’t have an active card, we can skip utilization questions. But before I do that I'm gonna ask you a important "
+                            "question. Ready to advance forward? ",
+                "mode": "credit",
+            }
+
+
+        if current_question == "collections" and yes_or_no == "yes":
+            session["signals"]["collections"] = "yes"
+
+            next_key, next_text = get_next_collection_question(session)
+            if next_key:
+                session["clarifying_question"] = next_key
+
+                return {
+
+                    "response": next_text,
+                    "mode": "credit",
+                }
+
+        if current_question == "collections" and yes_or_no == "n" or "no":
+            session["signals"]["collections"] = "no"
+
+        else:
+            return {
+
+                    "response": "Just entering yes or no is fine in this section!",
+                    "mode": "credit",
+                }
+
+
+
+        if current_question == "collections" and yes_or_no == "no":
+            session["signals"]["collections"] = "no"
+            session["state"] = "planning"
+            session["clarifying_question"] = None
+
+            return handle_planning_state(text, session)
+
+
+
+        if current_question == "collections":
+            yes_or_no = normalize_yes_no(text)
+
+            if yes_or_no is None:
+                return {
+                    "response": "Just entering yes or no works fine here! ",
+                    "mode": "credit",
+
+                }
+
+
+            session["collections"] = yes_or_no
+
+
+            if yes_or_no:
+                next_key, next_text = get_next_missing_signal(session)
+                session["current_question"] = next_key
+                session["state"] = "clarifying"
+
+
+                return {
+
+                    "response":next_text,
+                    "mode": "credit",
+                }
+
+            if not yes_or_no:
+                session["state"] = "planning"
+                return handle_planning_state(text, session)
+
+
+
+
+
+            # Logic for allowing the collection questions to run if they're called properly
+    elif current_question in COLLECTION_FLOW:
+        yes_or_no = normalize_yes_no(text)
+
+        if yes_or_no is None:
+            return {
+                        "response": "Just entering yes or no works fine for me!",
+                        "mode": "credit",
+                }
+
+        session[current_question] = yes_or_no
+
+        next_key, next_text = get_next_collection_question(session)
+
+            # Loop through all the keys until it's at the final key
+        if next_key:
+            session["clarifying_question"] = next_key
+
+            return {
+                        "response": next_text,
+                        "mode": "credit",
+                }
+
+            # When the session is done, make sure to switch to planning state to start building plans.
+        session["state"] = "planning"
+        session["current_question"] = None
+
+        return handle_planning_state(text, session)
+
+
+
+
+
+
+
+
+
+
+        # Ask next missing signal
+    if session.get("clarifying_question") is None and current_question not in COLLECTION_FLOW:
+        next_q = get_next_missing_signal(session)
+        if next_q:
+            session["clarifying_question"] = next_q
+            return {
+                "response": CLARIFY_QUESTIONS[next_q],
+                "mode": "credit",
+            }
+
+    # ✅ All signals collected → move to planning
+    session["state"] = "planning"
+    session["clarifying_question"] = None
+    return handle_planning_state(text, session)
+
+
+
+
+
+
+
+def handle_projection_logic(text: str, session: dict) -> dict:
+    text_lower = text.lower()
+    score = session.get("score_shared")
+
+
+    awaiting_score = session.get("awaiting_score")
+
+    if not awaiting_score and "projection" not in text_lower and "show my" not in text_lower:
+        return None
+
+    if not score:
+        session["awaiting_score"] = True
+        return {
+            "response": "I need your credit score to build a projection. What's your current score?",
+            "mode": "credit"
+        }
+
+    session["awaiting_score"] = False
+
+
+    topic = session.get("projection_topic") or session.get("last_topic", "general_credit")
+
+
+    if topic not in SCORE_SIMULATION_RANGES:
+        topic = "utilization"
+
+    scenario_key = list(SCORE_SIMULATION_RANGES[topic]["improvement_ranges"].keys())[0]
+    projection = generate_score_projection(score, topic, scenario_key)
+
+    return {
+        "response": f"Here's your score projection starting from {score}:",
+        "mode": "credit",
+        "projection_data": projection,
+        "show_projection_chart": True
+    }
+
+
+
+
+
+# -------------------------------------------------------
+
+# Handlers for each step that WRIn goes through
+
+# -------------------------------------------------------
+
+def diagnose_from_signals(session):
+    s = session.get("signals", {})
+
+    if s.get("missed_payments") == "yes":
+        return "payment_history"
+
+    if s.get("high_utilization") == "yes":
+        return "utilization"
+
+    if s.get("collections") == "yes":
+        return "collections"
+
+    if s.get("has_credit_card") == "no":
+        return "build_from_zero"
+
+    score = session.get("score_shared")
+    if score:
+        if score < 580:
+            return "build_from_zero"
+        elif score < 670:
+            return "utilization"
+        elif score < 740:
+            return "payment_history"
+        else:
+            return "optimization"  # If the user has a high score above the ones above just give them the bst advise towards optimization.
+
+    return None
+
+
+# handle the users next step plans.
+def handle_planning_state(text: str, session: dict) -> dict:
+
+    intent = session.get("last_intent", "improve")
+    previous_topic = session.get("last_topic")
+
+    print("\n[PLANNING STATE]")
+    print("Intent:", intent)
+    print("Previous Topic:", previous_topic)
+
+
+    # Diagnosis
+    topic_key = diagnose_profile(session)
+    session["last_topic"] = topic_key
+
+    topic_data = CREDIT_KNOWLEDGE.get(topic_key, {}) or CREDIT_KNOWLEDGE["general_credit"]
+
+    # Tone
+    emotion = _detect_credit_emotion(text)
+    opener = _get_credit_opener(emotion, text) if emotion else ""
+
+    # Reasoning
+    reasoning = apply_reasoning(intent, topic_key, session.get("score_shared"), signals=session.get("signals", {}))
+
+    projection = None
+
+    if (
+            session.get("score_shared")
+            and reasoning.get("projection_topic")
+            and reasoning.get("projection_scenario")
+    ):
+        projection = generate_score_projection(
+            session["score_shared"],
+            reasoning["projection_topic"],
+            reasoning["projection_scenario"]
+        )
+
+
+    plan = build_plan(topic_key, intent, session=session)
+    plan_text = format_plan(plan)
+
+    reasoning_lines = []
+    if reasoning.get("primary_action"):
+        reasoning_lines.append(reasoning["primary_action"])
+    if reasoning.get("urgency_note"):
+        reasoning_lines.append(reasoning["urgency_note"])
+    if reasoning.get("warning"):
+        reasoning_lines.append(f"⚠ {reasoning['warning']}")
+    if reasoning.get("score_projection") and reasoning.get("score_shared"):
+        reasoning_lines.append(f"Here is your score projection: {reasoning['score_projection']}")
+
+
+    reasoning_prefix = "\n".join(reasoning_lines)
+    separator = "\n\n" if reasoning_prefix else ""
+
+
+
+    # Sets the response to a build plan based response instead of nesting general credit and build plan responses together.
+    if topic_key not in ("general_credit", "optimization"):
+        knowledge_text = ""
+    else:
+        knowledge_text = topic_data.get("response", "")
+
+    if projection:
+        handle_projection_logic(text, session)
+
+
+    # --- CONTEXT SIGNALS ---
+    same_topic = previous_topic == topic_key
+    follow_up = _is_follow_up(text)
+    appreciation = is_appreciation(text)
+
+    intent_allows = intent in {"learn", "improve", "diagnose"}
+
+    # --- EXPANSION LOGIC ---
+    force_expand = appreciation and same_topic
+    conditional_expand = same_topic and intent_allows and follow_up
+
+    if force_expand or conditional_expand:
+        knowledge_text = topic_data.get("elaboration", knowledge_text)
+
+    # --- PREFIX (tone only, not logic) ---
+    prefix = ""
+    if force_expand:
+        prefix = get_appreciation_prefix() + "Here's how you can actually apply this:\n\n"
+
+    print("Is Same Topic:", previous_topic == topic_key)
+    print("Is Follow Up:", _is_follow_up(text))
+    print("User typed in appreciation:", is_appreciation(text))
+
+
+    # --- FINAL RESPONSE ---
+    response_text = (
+            opener
+            + prefix
+            + knowledge_text
+            + "\n\n "
+            + reasoning_prefix
+            + separator
+            + plan_text
+    )
+
+
+    # Store state
+    session["current_plan"] = plan
+
+    # Set the current plan saved so that the data can be used and viewed.
+    session.setdefault("plans_given", [])
+    session["plans_given"].append({
+        "topic": topic_key,
+        "date": datetime.datetime.now().isoformat(),
+        "completed": False
+    })
+
+    session["state"] = "plan_given"
+
+    book = _recommend_audiobook(text, session)
+    record_feedback(session, intent, topic_key)
+    _push_credit_history(session, "assistant", response_text)
+
+
+    if session.get("score_shared") :
+        session["projection_ready"] = True
+        session["projection_topic"] = topic_key
+
+        return {
+            "response": response_text + "\n\nWant to see what this could look like over the next few months? I can show you a realistic range based on your score.",
+            "mode": "credit",
+            "show_projection_prompt": True
+        }
+
+    print("\n[RESPONSE DEBUG]")
+    print("FINAL TOPIC:", topic_key)
+    print("STATE SET TO:", session.get("state"))
+    print("RESPONSE LENGTH:", len(response_text))
+    print("----------------------\n")
+
+
+    return {
+        "response": response_text,
+        "mode": "credit",
+        "suggest_books": book is not None,
+        "book": book,
+    }
+
+
+
+
+def handle_explain_state(text: str, session: dict) -> dict:
+
+    last_topic = session.get("last_topic")
+
+    # Follow-up on same topic if user is drilling deeper
+    if _is_follow_up(text) and session.get("last_topic"):
+        topic_key = session["last_topic"]
+    else:
+        # Try exact keyword match first, then scored retrieval
+        topic_key = match_credit_knowledge(text) or retrieve_concept(text)[0]
+
+        if topic_key == "general_credit" and last_topic and last_topic != "general_credit":
+            topic_key = last_topic
+
+    session["last_topic"] = topic_key
+    session["last_intent"] = "learn"
+
+    topic_data = CREDIT_KNOWLEDGE.get(topic_key) or CREDIT_KNOWLEDGE["general_credit"]
+
+    body = topic_data.get("response", "")
+
+
+    # Prefer elaboration if user is following up, otherwise base response
+    if _is_follow_up(text) and topic_data.get("elaboration"):
+        body = topic_data["elaboration"]
+
+
+
+    emotion = _detect_credit_emotion(text)
+    opener = _get_credit_opener(emotion, text) if emotion else ""
+
+    response_text = opener + body
+
+    book = _recommend_audiobook(text, session)
+    record_feedback(session, "learn", topic_key)
+    _push_credit_history(session, "assistant", response_text)
+
+
+    session["state"] = "normal"
+
+
+    return {
+        "response": response_text,
+        "mode": "credit",
+        "suggest_books": book is not None,
+        "book": book,
+    }
+
+
+def handle_decision_state(text: str, session: dict, reasoning: dict = None) -> dict:
+    projection = handle_projection_logic(text, session)
+    if projection: return projection
+
+    # If the user wants to learn something mid-decision, detour then come back
+    intent = classify_intent(text)
+    if intent == "learn":
+        session["return_to_state"] = "decision"
+        session["state"] = "explain"
+        return handle_explain_state(text, session)
+
+    improve_signals = [
+        "start building", "build my credit", "start credit",
+        "begin building", "how do i start", "where do i start",
+        "get started", "begin credit", "first step"
+    ]
+
+    text_lower = text.lower()
+    if any(sig in text_lower for sig in improve_signals):
+        session["state"] = "clarifying"
+        session["clarifying_state"] = "has_credit_card"
+        session["last_intent"] = "improve"
+        return handle_smart_message(text, session)
+
+    topic_key = retrieve_concept(text)[0]
+    session["last_topic"] = topic_key
+
+    topic_data = CREDIT_KNOWLEDGE.get(topic_key) or CREDIT_KNOWLEDGE["general_credit"]
+
+    if reasoning is None:
+        reasoning = apply_reasoning("decide", topic_key, session.get("score_shared"))
+
+    lines = ["Here's how to think about this decision:\n"]
+
+    # Pull structured fields from topic_data if they exist
+    if topic_data.get("pros"):
+        lines.append("Pros:")
+        lines.extend(f"  • {p}" for p in topic_data["pros"])
+
+    if topic_data.get("cons"):
+        lines.append("Cons:")
+        lines.extend(f"  • {c}" for c in topic_data["cons"])
+
+    if topic_data.get("impact"):
+        lines.append(f"\nCredit impact: {topic_data['impact']}")
+
+    # Layer in reasoning-engine output
+    if reasoning.get("recommendation"):
+        lines.append(f"\nRecommendation: {reasoning['recommendation']}")
+    if reasoning.get("pro"):
+        lines.append(f"Pro: {reasoning['pro']}")
+    if reasoning.get("con"):
+        lines.append(f"Con: {reasoning['con']}")
+    if reasoning.get("better_alternative"):
+        lines.append(f"Better option: {reasoning['better_alternative']}")
+    if reasoning.get("cause_effect"):
+        lines.append(f"\nImpact: {reasoning['cause_effect']}")
+    if reasoning.get("urgency_note"):
+        lines.append(f"\n{reasoning['urgency_note']}")
+
+
+    urgency = reasoning.get("urgency_note", "")
+    if urgency and topic_key not in ("general_credit", "build_from_zero"):
+        lines.append(f"\n {urgency} ")
+
+    # If none of the structured fields fired, fall back to the topic's base response
+    if len(lines) == 1:
+        # Pull the first unanswered decide clarification question
+        tree = CLARIFY_TREE.get("decide", {}).get("general_credit", [])
+        asked = session.get("clarify_asked", [])
+
+        next_question = None
+        for key, question in tree:
+            if key not in asked:
+                session.setdefault("clarify_asked", []).append(key)
+                session["clarifying_question"] = key
+                session["state"] = "clarifying"
+                next_question = question
+                break
+
+        if next_question:
+            _push_credit_history(session, "assistant", next_question)
+            return {"response": next_question, "mode": "credit"}
+
+        # All clarification exhausted — now route to planning with what we have
+        session["state"] = "planning"
+        session["last_intent"] = "decide"
+        return handle_planning_state(text, session)
+
+
+    response_text = "\n".join(lines)
+
+    record_feedback(session, "decide", topic_key)
+    _push_credit_history(session, "assistant", response_text)
+    session["state"] = "normal"
+
+
+    return {
+        "response": response_text,
+        "mode": "credit",
+    }
+
+
+
+#A clear visualization of how many states WRIN has to guide the user.
+STATES = {
+    "normal": "figuring out intent/topic",
+    "clarifying": "asking questions",
+    "explain": "teaching concept",
+    "planning": "giving steps",
+    "decision": "helping choose"
+}
+
+
+def detect_direct_path(text):
+    text = text.lower()
+
+    if "no credit" in text or "never had credit" in text:
+        return "has_credit_card", "no"
+
+    if "missed payment" in text or "late payment" in text:
+        return "missed_payment", "yes"
+
+    if "maxed out" in text or "high balance" in text:
+        return "high_utilization", "yes"
+
+    if "collections" in text:
+        return "collections", "yes"
+
+
+    return None
+
+
+# Fish for the missing signal that the user gives off so that we can direct them to the right response to fix their problem.
+def get_missing_signal(session):
+    signals = session.get("signals", {})
+    credit_key = ["credit_score", "has_credit_card", "high_utilization", "missed_payments", "collections"]
+
+
+    for key in credit_key:
+        if key == "credit_score" and session.get("score_shared"):
+            continue
+
+        if key not in signals:
+            return key
+
+    return None
+
+
+
+
+
+# Smart handler for routing so that WRIN can give th ebest response based on what the user's needs are, and focuses on meeting it instantly.
+def handle_smart_message(text: str, session: dict) -> dict:
+    projection = handle_projection_logic(text, session)
+    if projection:
+
+        return projection
+
+    """
+    Single entry point that handles:
+    1. Extracting and saving credit score
+    2. Answering definition/concept questions from CREDIT_KNOWLEDGE
+    3. If also asking how to fix → run clarification → score-aware plan
+    """
+    text_lower = text.lower()
+
+    # Global appreciation logic handler.
+    if is_appreciation(text):
+        response = get_appreciation_prefix()
+        return {"response": response, "mode": "credit"}
+
+    # ── Step 1: Always extract score if present ───────────────────────────
+    detected_score = _extract_credit_score(text)
+    if detected_score:
+        session["score_shared"] = detected_score
+
+
+    # ── Step 2: Identify the concept they're asking about ─────────────────
+    topic_key = match_credit_knowledge(text) or retrieve_concept(text)[0]
+
+    if topic_key and topic_key != "general_credit":
+        session["last_topic"] = topic_key
+
+
+    topic_data = CREDIT_KNOWLEDGE.get(topic_key)
+
+
+    if not topic_data:
+        topic_key = session.get("last_topic", "general_credit")
+        topic_data = CREDIT_KNOWLEDGE.get(topic_key, CREDIT_KNOWLEDGE.get("general_credit"))
+
+    # ── Step 3: Check what kind of message this is ────────────────────────
+    wants_definition = any(s in text_lower for s in [
+        "what is", "what's", "explain", "how does", "define", "whats",
+        "what does", "tell me about", "what are", "what exactly","how do I"
+    ])
+    wants_fix = any(s in text_lower for s in [
+        "fix", "improve", "raise", "build", "how do i", "how can i",
+        "what should i do", "help me", "what do i do", "steps"
+    ])
+
+    # Make sure the vague responses don't get passed as trying to draw an explanation.
+    if len(text_lower.split()) <= 2:
+        topic_key = session.get("last_topic", topic_key)
+        wants_definition = False
+        wants_fix = False
+
+
+
+
+    is_follow_up = _is_follow_up(text_lower)
+
+    if is_follow_up:
+        wants_definition = True
+        wants_fix = False
+
+
+    parts = []
+
+    # ── Step 4: If they want a definition, give it first ──────────────────
+    if wants_definition:
+        explanation = topic_data.get("response", "")
+        if explanation:
+            parts.append(explanation)
+
+    # ── Step 5: If they want to fix, handle score-aware routing ───────────
+    if wants_fix:
+        score = session.get("score_shared")
+
+        # If we have their score, skip clarification and go straight to plan
+        if score:
+            plan = build_plan(topic_key, "improve", session)
+            plan_text = format_plan(plan)
+
+            reasoning = apply_reasoning("improve", topic_key, score, signals=session.get("signals", {}))
+
+            projection = None
+            if reasoning.get("projection_topic") and reasoning.get("projection_scenario"):
+                projection = generate_score_projection(
+                    current_score=session["score_shared"],
+                    topic=reasoning["projection_topic"],
+                    scenario_key=reasoning["projection_scenario"]
+                )
+
+            reasoning_lines = []
+            if reasoning.get("primary_action"):
+                reasoning_lines.append(reasoning["primary_action"])
+            if reasoning.get("urgency_note"):
+                reasoning_lines.append(reasoning["urgency_note"])
+            if reasoning.get("warning"):
+                reasoning_lines.append(f"⚠ {reasoning['warning']}")
+
+            if parts:  # already have a definition above
+                parts.append("─" * 28)
+                parts.append("Now here's your plan:\n")
+
+            parts.append(plan_text)
+            if reasoning_lines:
+                parts.append("\n" + "\n".join(reasoning_lines))
+
+            session["current_plan"] = plan
+            session["state"] = "plan_given"
+            session["last_intent"] = "improve"
+
+
+
+        else:
+            concrete_topics = {
+                "build_from_zero", "utilization", "payment_history",
+                "collections", "credit_age", "secured_card"
+            }
+
+            if topic_key in concrete_topics:
+                plan = build_plan(topic_key, "improve", session)
+                plan_text = format_plan(plan)
+                parts.append(plan_text)
+                session["current_plan"] = plan
+                session["state"] = "normal"
+                session["last_intent"] = "improve"
+                session["last_topic"] = topic_key
+
+            else:
+                # Only here if topic is genuinely vague (general_credit) is predominant topic to look into, etc.)
+                session["state"] = "clarifying"
+                session["clarifying_question"] = "has_credit_card"
+                session["last_intent"] = "improve"
+
+                if parts:
+                    parts.append("─" * 28)
+                    parts.append("Now to build your plan, " + CLARIFY_QUESTIONS["has_credit_card"])
+                else:
+                    response_text = CLARIFY_QUESTIONS["has_credit_card"]
+                    _push_credit_history(session, "assistant", response_text)
+                    return {"response": response_text, "mode": "credit"}
+
+    # ── Step 6: Stitch and return ─────────────────────────────────────────
+    response_text = "\n\n".join(p for p in parts if p.strip())
+
+    book = _recommend_audiobook(text, session)
+    record_feedback(session, session.get("last_intent", "learn"), topic_key)
+    _push_credit_history(session, "assistant", response_text)
+
+    session["state"] = "normal"
+
+    return {
+        "response": response_text,
+        "mode": "credit",
+        "suggest_books": book is not None,
+        "book": book,
+    }
+
+
+
+
+
+def handle_credit_message(user_name: str, text: str) -> dict:
+    session = _get_credit_session(user_name)
+    text = text.strip()
+    state = session.get("state", "normal")
+
+    # Global appreciation condition.
+    if is_appreciation(text):
+        response = get_appreciation_prefix()
+        return {"response": response, "mode": "credit"}
+
+    if "back" in text:
+        session["state"] = "normal"
+
+        return {"response": "Okay what's on your mind? ", "mode": "credit"}
+
+
+
+    if not text:
+        opening = _pick_opening(session)
+        print("[OPENING PICKED]:", opening)
+        session["turn_count"] = session.get("turn_count", 0) + 1
+        _push_credit_history(session, "assistant", opening)
+        save_credit_data()
+        return {"response": opening, "mode": "credit"}
+
+    _push_credit_history(session, "user", text)
+
+    # ── Single score detection — runs for ALL states ──────────────
+    detected_score = _extract_credit_score(text)
+    if detected_score:
+        session["score_shared"] = detected_score
+        # New addition, keep persistent scoring to measure user credit score jumps.
+
+
+        session.setdefault("score_history", [])
+        session["score_history"].append({
+            "score": detected_score,
+            "date": datetime.datetime.now().isoformat()
+        })
+        session.setdefault("signals", {})
+        session["signals"]["credit_score"] = detected_score
+
+        # Check for significant score change the moment a user inputs a new credit score.
+        history = session["score_history"]
+        if len(history) >= 2:
+            previous = history[-2]["score"]
+            current = history[-1]["score"]
+            diff = current - previous
+
+            if abs(diff) >= 15:
+                session["score_changed"] = True
+                session["score_change_delta"] = diff
+                session["score_change_previous"] = previous
+
+
+
+        # Identify and speak to the score change.
+        if session.get("score_changed"):
+            session["score_changed"] = False  # reset so it only fires once
+            delta = session.get("score_change_delta", 0)
+            previous = session.get("score_change_previous", 0)
+
+            if delta > 0:
+                return {
+                    "response": (
+                        f"Hold on, your score jumped {delta} points from {previous} to {detected_score}. "
+                        f"That's a significant move. Keeping up habits like this is how you build the credit future "
+                        f"we both know you deserve. Keep going!"
+                    ),
+                    "mode": "credit",
+                    "score_captured": detected_score,
+                }
+            else:
+                return {
+                    "response": (
+                        f"Your score dropped {abs(delta)} points from {previous} to {detected_score}. "
+                        f"A drop this size usually has a clear cause,missed payment, high utilization spike, or a new hard inquiry. "
+                        f"For your own benefit, please be mindful of your current situation, and remember I can build you a new plan"
+                        f"that suits your current situation. Just ask (How can I fix my credit score) "
+                    ),
+                    "mode": "credit",
+                    "score_captured": detected_score,
+                }
+
+
+
+
+        score_only_triggers = [
+            "my credit score is",
+            "my score is",
+            "credit score is",
+            "i have a",
+            "im at",
+            "i'm at",
+            "my new score",
+            "new score",
+            "score upgrade"
+        ]
+
+        text_lower = text.lower()
+
+        if any(trigger in text_lower for trigger in score_only_triggers):
+            session["state"] = "normal"
+            session["clarifying_question"] = None
+
+            return {
+                "response": f"Got it, I've just locked your credit score locked in at {detected_score}. ",
+                "mode": "credit",
+                "score_captured": detected_score,
+            }
+
+
+
+
+
+    if handle_user_greeting(text):
+        response = (
+            "Hey there friend, it's nice to meet you, while I'd love to chat. "
+            "I'm focused on one thing directly, pushing you in the right direction "
+            "towards having S+ tier credit, to nudge you in the right direction, "
+            "I'd recommend exploring something like: 'what's my credit projection score' "
+            "or ask 'how can I fix my credit score?'"
+        )
+        _push_credit_history(session, "assistant", response)
+        save_credit_data()
+        return {"response": response, "mode": "credit"}
+
+    print(f"[ROUTER] Current state: {state}")
+    result = None
+
+    if state == "plan_given":
+        result = handle_plan_followup(text, session)
+
+    elif state == "clarifying":
+        result = handle_clarification_state(text, session)
+
+    elif state == "planning":
+        result = handle_planning_state(text, session)
+
+    elif state == "explain":
+        result = handle_explain_state(text, session)
+
+    elif state == "decision":
+        result = handle_decision_state(text, session)
+
+    else:
+
+
+        if session.get("current_plan"):
+            plan_signals = [
+                "step", "timeline", "how long", "first", "start",
+                "can't", "cant", "explain step", "what do i do first"
+            ]
+            if any(sig in text.lower() for sig in plan_signals):
+                result = handle_plan_followup(text, session)
+
+        if result is None:
+            session["state"] = "clarifying"
+            session["clarifying_question"] = "has_credit_card"
+            result = {"response": CLARIFY_QUESTIONS["has_credit_card"], "mode": "credit"}
+
+
+        intent = classify_intent(text)
+        session["last_intent"] = intent
+
+        if intent in ["learn", "improve", "diagnose", "decide", ""]:
+            session.pop("projection_active", None)
+            session.pop("awaiting_projection_confirmation", None)
+            session.pop("projection_topic", None)
+
+        if intent == "decide":
+            session["state"] = "decision"
+            result = handle_decision_state(text, session)
+
+        elif intent == "learn":
+            session["state"] = "explain"
+            result = handle_explain_state(text, session)
+
+        elif intent in ("improve", "diagnose", "score_shared"):
+            direct_clue = detect_direct_path(text)
+
+            if direct_clue:
+                question, answer = direct_clue
+                session.setdefault("signals", {})
+                session["signals"][question] = answer
+                session["state"] = "planning"
+                result = handle_planning_state(text, session)
+
+            if is_projection(text) and detected_score:
+                topic = session.get("projection_topic") or session.get("last_topic", "general_credit")
+                if topic not in SCORE_SIMULATION_RANGES:
+                    topic = "utilization"
+                scenario_key = list(SCORE_SIMULATION_RANGES[topic]["improvement_ranges"].keys())[0]
+                projection = generate_score_projection(detected_score, topic, scenario_key)
+                save_credit_data()
+                return {
+                    "response": f"Here's your score projection starting from {detected_score}:",
+                    "mode": "credit",
+                    "projection_data": projection,
+                    "show_projection_chart": True,
+                    "score_captured": detected_score,
+                }
+
+
+
+        else:
+            result = handle_smart_message(text, session)
+
+    # ── Single injection point — always runs before return ────────
+    if result and detected_score:
+        result["score_captured"] = detected_score
+
+    save_credit_data()
+    return result
+
+
+
+
+
+
+# return the yes or no words mapper (made to help wrin understand NLP)
+def normalize_yes_no(text):
+    text = text.lower()
+
+    YES_WORDS = ["yes", "yeah", "yep", "y", "sure", "ok", "okay", "alright", "i do", "i have", "correct"]
+    NO_WORDS = ["no", "nope", "n", "not", "don't", "do not", "never"]
+
+    for word in YES_WORDS:
+        if word in text:
+            return "yes"
+
+    for word in NO_WORDS:
+        if word in text:
+            return "no"
+
+    return None
+
+
+def handle_plan_followup(text: str, session: dict) -> dict:
+    projection = handle_projection_logic(text, session)
+    if projection: return projection
+
+
+    text_lower = text.lower()
+    plan = session.get("current_plan")
+
+    # If user wants to learn something, detour without losing plan state
+    intent = classify_intent(text)
+    if intent == "learn":
+        session["return_to_state"] = "plan_given"
+        session["state"] = "explain"
+        return handle_explain_state(text, session)
+
+    if not plan:
+        session["state"] = "normal"
+        return {
+            "response": "Let's start over, can you tell me what's going on with your credit.",
+            "mode": "credit",
+        }
+
+    steps = plan.get("steps", [])
+
+    # Timeline / how long questions
+    if any(w in text_lower for w in ("how long", "timeline", "when will", "how soon", "how much time", "time length", "when will")):
+        return {
+            "response": f"Timeline: {plan.get('timeline', 'Depends on how consistently you follow through — most people see movement in 30–60 days.')}",
+            "mode": "credit",
+        }
+
+    # First step / where to start
+    if any(w in text_lower for w in ("first", "start", "priority", "where do i begin", "what do i do first", "whats the first step", "how do I even start", "whats the first move", "first action")):
+        first = steps[0] if steps else "Focus on building a pattern of on-time payments and keeping your credit balances low."
+        return {
+            "response": f"Start here:\n\nStep 1: {first}",
+            "mode": "credit",
+        }
+
+    # Explain a numbered step: "explain step 2"
+    for i, step in enumerate(steps, 1):
+        if f"step {i}" in text_lower or f"number {i}" in text_lower:
+            return {
+                "response": f"Step {i}, here's what this means in practice:\n\n{step}",
+                "mode": "credit",
+            }
+
+    # User says they can't do something
+    if any(w in text_lower for w in ("can't", "cant", "unable", "don't have", "don't know how", "cant even", "not possible", "wont be able", "sounds impossible", "will not work")):
+        return {
+            "response": (
+                "It's fine that you feel that way, but remember to adjust, don't stop.\n\n"
+                "The two things you can always control right now: "
+                "pay on time (set autopay which will save you a lot of stress) and keep balances low. "
+                "Starting there while you figure out the rest is the best steps towards getting you where you wanna go."
+            ),
+            "mode": "credit",
+        }
+
+    # Acknowledgement — wrap up plan mode cleanly
+    if text_lower.strip() in ("ok", "okay", "got it", "thanks", "thank you", "makes sense", "cool"):
+
+
+        if session.get("plans_given"):
+            session["plans_given"][-1]["completed"] = True
+        session["state"] = "normal"
+
+        return {
+            "response": "Its good we're on the same page. Come back and tell me when you've completed Step one, or if anything comes up. We will handle it step by step",
+            "mode": "credit",
+        }
+
+    # card preferences - which card choice is the best fit for me?
+    if check_beginner_card_trigger(text):
+        session["state"] = "normal"
+        return {
+            "response": BEGINNER_CARD_RESPONSE,
+            "mode": "credit",
+        }
+
+
+
+    # Default: show the full plan again with navigation hints
+    plan_text = format_plan(plan)
+    return {
+        "response": (
+            f"Here's your plan:\n\n{plan_text}\n\n"
+            "You can ask:\n"
+            "• Which step should I start with?\n"
+            "• How long will this take?\n"
+            "• Explain step 'number one' \n"
+            "• Re-enter a new credit score that you have/"
+            "• I can't do the first step, what are some healthy alternatives?"
+            "- 'Whats my projection' to get live visual estimates of how much your score can grow within months."
+            "Whatever questions you have, I'm here to work with you through it. "
+        ),
+        "mode": "credit",
+    }
+
+
+def build_plan(topic, intent, session):
+
+    plan = {
+        "title": "",
+        "steps": [],
+        "timeline": None,
+        "warnings": [],
+        "bottlenecks": []
+    }
+
+    def step(title, detail):
+        return {"title": title, "detail": detail}
+
+    if topic == "build_from_zero":
+        plan["title"] = "Build Your Credit from Scratch"
+
+        plan["steps"] = [
+            step("Choose the right starter card",
+                 "Open a secured or student credit card, whichever puts you in the best position."),
+            step("Use it lightly and consistently",
+                 "Use it for small purchases like gas or food, then pay it off consistently."),
+            step("Limit number of cards",
+                 "Stick to 1–2 cards max while building."),
+            step("Control utilization",
+                 "Keep balances under 30% of your limit."),
+            step("Always pay in full",
+                 "Pay your total balance every single month. In America, a 300 credit score is an 'Invisible Tax' "
+                 "that makes every car, apartment, and bill 2-3x more expensive for you. By paying in full, you "
+                 "refuse to pay that tax and instead force the banks to give YOU as the borrower free rewards. "
+                 "Being responsible isn't just about 'doing the right thing', it's about keeping your "
+                 "money in your pocket so you can buy your way into a better life. "
+                 "To see the gap between 'where you are' and 'where you can go,' ask me 'whats my score projection' after giving me your credit score.")
+        ]
+
+        plan["timeline"] = "You can generate a credit score in about 3–6 months."
+
+        plan["bottlenecks"] = [
+            "Getting approved for your first card is the hardest step, denial is highly likely with zero credit history. ",
+            "Your score won't appear for 3–6 months, so progress feels invisible early on.",
+            "One missed payment in this window causes huge damage to a file that is very thin or lacking credit history."
+        ]
+
+    elif topic == "utilization":
+        plan["title"] = "Lower Your Credit Utilization"
+
+        plan["steps"] = [
+            step("Pay down balances",
+                 "Reduce your credit card balances gradually without overextending yourself."),
+            step("Target utilization range",
+                 "Aim for under 30%, ideally closer to 10%."),
+            step("Increase your limit",
+                 "Request a credit limit increase to lower your ratio instantly. If you wanna see visually how beneficial it is, just ask me 'whats my score projection' and I'll show you.")
+        ]
+
+        plan["timeline"] = "You may see improvement in 30–60 days."
+
+        plan["bottlenecks"] = [
+            "Bureaus only update balances when your statement closes, paying early may not be shown to you immediately. ",
+            "A limit increase request can trigger a hard inquiry, temporarily dipping your score. ",
+            "Carrying a balance on even one maxed card can offset progress made on others. "
+        ]
+
+    elif topic == "payment_history":
+        plan["title"] = "Fix Your Payment History"
+
+        plan["steps"] = [
+            step("Address late accounts immediately",
+                 "Identify and resolve any missed payments."),
+            step("Enable autopay",
+                 "Set up automatic payments to avoid future misses."),
+            step("Prioritize high-interest accounts",
+                 "Focus on accounts costing you the most.")
+        ]
+
+        plan["timeline"] = "Recovery takes time, expect several months. I can show you how much you can benefit from doing this, just ask me 'whats my score projection'. "
+
+        plan["bottlenecks"] = [
+            "Late payments stay on your report for up to 7 years, there is no fast removal without lender cooperation. ",
+            "A single new missed payment diminishes any idea you have of recovering, so make sure to only spend what you know you can pay back. ",
+            "Another idea is autopay only works if your bank account has enough funds to pay off the credit debt, NSF (non-sufficient fund) failures still register as missed or late payments."
+        ]
+
+    elif topic == "collections_first":
+        paid = session.get("paid_collections")
+        recent = session.get("recent_collections")
+        medical = session.get("medical_collections")
+        disputed = session.get("collection_dispute")
+        multiple = session.get("multiple_collections")
+        goal = session.get("collection_goal")
+
+        plan["title"] = "Your Collections Removal Plan"
+
+        if paid == "yes":
+            plan["steps"].append(step(
+                "Request goodwill deletion",
+                "Since you've already paid, write a goodwill letter to the collection agency "
+                "asking them to remove the entry. Many will comply — it costs them nothing."
+            ))
+        else:
+            plan["steps"].append(step(
+                "Negotiate pay-for-delete before paying",
+                "Contact the agency and offer to pay in exchange for full deletion from your report. "
+                "Get the agreement in writing before sending a single dollar."
+            ))
+
+        if medical == "yes":
+            plan["steps"].append(step(
+                "Dispute medical collections first",
+                "Medical collections under $500 were removed from FICO scoring in 2023. "
+                "Dispute these with the bureaus directly — many will be removed for free."
+            ))
+
+        if disputed == "no" or disputed is None:
+            plan["steps"].append(step(
+                "File disputes for any errors",
+                "Pull your report at annualcreditreport.com and check every collection entry for errors. "
+                "Wrong balance, wrong date, wrong creditor — any error is grounds for removal. "
+                "File at Experian, Equifax, and TransUnion directly."
+            ))
+
+        if multiple == "yes":
+            plan["steps"].append(step(
+                "Prioritize by age and balance",
+                "Tackle the most recent collections first — they hurt your score the most. "
+                "Older collections (5+ years) have less impact and may be near the 7-year drop-off."
+            ))
+
+        if recent == "yes":
+            plan["steps"].append(step(
+                "Act fast on recent collections",
+                "Collections under 2 years old cause the most score damage. "
+                "Resolving these now gives you the fastest score recovery."
+            ))
+
+        plan["steps"].append(step(
+            "Freeze your credit after resolution",
+            "Once collections are resolved, freeze your credit at all 3 bureaus. "
+            "Free, permanent protection while you rebuild."
+        ))
+
+        if recent == "yes" or multiple == "yes":
+            plan["timeline"] = "Expect 1–3 months per resolved collection. Full recovery takes 6–12 months of clean history after."
+        else:
+            plan["timeline"] = "Most single collections resolve within 1–3 months after contact."
+
+        if goal == "yes":
+            plan["warnings"].append(
+                "Since removal is your main goal, never pay without a written pay-for-delete agreement first. "
+                "Paying without that agreement removes your leverage permanently."
+            )
+
+        plan["timeline"] = "Improvement may happen within 1–3 months."
+        plan["warnings"].append("Do NOT ignore collections — they heavily damage your score.")
+
+        plan["bottlenecks"] = [
+            "Collection agencies are not required to accept pay-for-delete — some will refuse outright.",
+            "Paying a collection without a written agreement closes your leverage permanently.",
+            "Disputes can take up to 45 days per bureau, and all three must be filed separately.",
+            "A re-aged or re-sold collection restarts its visible damage even on old debt."
+        ]
+
+        if medical == "yes":
+            plan["bottlenecks"].append(
+                "Medical collections over $500 still appear on your report and must be handled separately."
+            )
+
+        if multiple == "yes":
+            plan["bottlenecks"].append(
+                "With multiple collections, resolving one won't dramatically move your score — the stack effect is real."
+            )
+
+    elif topic == "credit_age":
+        plan["title"] = "Protect Your Credit Age"
+
+        plan["steps"] = [
+            step("Keep old accounts open",
+                 "Closing them reduces your average credit age."),
+            step("Use old cards occasionally",
+                 "Keep them active without high balances."),
+            step("Avoid unnecessary closures",
+                 "Request product changes instead of closing accounts.")
+        ]
+
+        plan["timeline"] = "This improves slowly over time."
+
+        plan["bottlenecks"] = [
+            "Issuers can close inactive accounts on their own — a small recurring charge prevents this.",
+            "Account age improves only with time — there is no shortcut or workaround.",
+            "Opening new accounts lowers your average age immediately, even if unintended."
+        ]
+
+    elif topic == "general_credit" and intent == "improve":
+        plan["title"] = "Improve Your Overall Credit"
+
+        plan["steps"] = [
+            step("Pay on time", "Never miss a payment."),
+            step("Keep balances low", "Stay under 30% utilization."),
+            step("Limit applications", "Avoid too many hard inquiries."),
+            step("Keep accounts open", "Preserve your credit history.")
+        ]
+
+        plan["timeline"] = "Most improvements take 1–3 months. I am able to help you visualize your success, just type 'whats my projected score', and you can visualize it with your current credit score. "
+
+        plan["bottlenecks"] = [
+            "Multiple factors interact — improving one area while neglecting another stalls overall progress.",
+            "Hard inquiries from applications temporarily suppress your score even with good habits.",
+            "Progress is nonlinear — scores can dip before rising as accounts age and balances shift."
+        ]
+
+    # fallback
+    if not plan["steps"]:
+        plan["title"] = "General Credit Advice"
+        plan["steps"] = [
+            step("Pay on time", "Always pay your bills on time."),
+            step("Keep balances low", "Maintain low utilization.")
+        ]
+        plan["timeline"] = "Most people see changes in 1–3 months."
+        plan["bottlenecks"] = [
+            "Without knowing your specific situation, these are general starting points only.",
+            "Progress stalls when the real underlying issue — utilization, collections, payment gaps — goes unaddressed."
+        ]
+
+    return plan
+
+
+
+
+
+
+
+
+
+# ===========================================================================
+# SESSION HELPERS
+# ===========================================================================
+
+def _get_credit_session(user_name: str) -> dict:
+    if user_name not in user_credit_sessions:
+        user_credit_sessions[user_name] = {
+            "history": [],
+            "last_topic": None,
+            "last_intent": None,
+            "last_emotion": None,
+            "stage": "credit_chat",
+            "pending": {},
+            "score_shared": None,
+            "turn_count": 0,
+            "feedback": [],
+            "clarifying_question": None,
+            "last_action": None,
+            "state": "normal",
+            "clarify_asked": [],
+            "signals": {},
+        }
+
+
+
+    return user_credit_sessions[user_name]
+
+
+def _push_credit_history(session: dict, role: str, content: str):
+    session["history"].append({"role": role, "content": content})
+    if len(session["history"]) > 40:
+        session["history"] = session["history"][-40:]
+
+
+
+def _pick_opening(session: dict) -> str:
+    # Newly added credit memory across sessions to identify if the user is improving.
+    history = session.get("score_history", [])
+
+    if len(history) >= 2:
+        last = history[-2]["score"]
+        current = history[-1]["score"]
+        diff = current - last
+
+        if diff > 0:
+            return (
+                f"Welcome back. Last time you were at {last}, now you're at {current}. "
+                f"That's +{diff} points — real progress. Let's keep building on it."
+            )
+        elif diff < 0:
+            return (
+                f"Welcome back. Your score moved from {last} to {current} since we last talked. "
+                f"Let's figure out what caused that drop and fix it."
+            )
+        else:
+            return (
+                f"Welcome back. You're still sitting at {current}. "
+                f"Nothing lost, but let's find the next move to push it forward."
+            )
+
+    turn = session.get("turn_count", 1)
+    return CREDIT_OPENING_PROMPTS[turn % len(CREDIT_OPENING_PROMPTS)]
+
+
+# ===========================================================================
+# LAYER 1 — INTENT CLASSIFICATION
+# Determines WHY the user is asking, not just what they're asking about
+# ===========================================================================
+
+def classify_intent(text: str) -> str:
+    """
+    Returns one of: learn | improve | diagnose | decide | unknown
+
+    Scoring:
+      - Full phrase match = 3 points
+      - Partial word overlap = 0.7 per word
+      - Threshold: 1.5 to assign an intent
+      this is the number range to match a user input as an efficient response.
+    """
+    text_lower = text.lower()
+    scores = {}
+
+    # Instant activation list
+
+    # instant decide list
+    if "should i" in text_lower:
+        return "decide"
+    if "what happens if" in text_lower:
+        return "decide"
+    if "will this" in text_lower or "does this" in text_lower:
+        return "decide"
+
+    # Instant improve list
+    if "how do i improve" in text_lower or "how can i improve" in text_lower:
+        return "improve"
+    if "how do i fix" in text_lower or "how can i fix" in text_lower:
+        return "improve"
+    if "how do i raise" in text_lower or "how can i raise" in text_lower:
+        return "improve"
+
+    # Instant diagnose list
+    if "why" in text_lower:
+        return "diagnose"
+
+    # Instant learn activation words
+    if "what is" in text_lower or "explain" in text_lower:
+        return "learn"
+    if "how does" in text_lower or "explain" in text_lower:
+        return "learn"
+    if "teach me" in text_lower or "define" in text_lower:
+        return "learn"
+    if "whats a" in text_lower:
+        return "learn"
+
+
+
+    for intent_name, intent_data in INTENT_DEFINITIONS.items():
+        score = 0.0
+        for phrase in intent_data["phrases"]:
+            if phrase in text_lower:
+                score += 3.0
+            else:
+                phrase_words = phrase.split()
+                matches = sum(1 for w in phrase_words if w in text_lower)
+                score += matches * 0.7
+        scores[intent_name] = score
+
+    best = max(scores, key=scores.get)
+    return best if scores[best] >= 1.5 else "unknown"
+
+
+# ===========================================================================
+# LAYER 2 — CONCEPT RETRIEVAL
+# Finds the most relevant knowledge topic given the text
+# ===========================================================================
+def retrieve_concept(user_input: str) -> tuple[str, float]:
+    text = user_input.lower()
+    scores = {}
+
+    for topic, keywords in TOPIC_KEYWORDS.items():
+        score = 0
+        for phrase in keywords:
+            if phrase in text:
+                score += len(phrase.split())  # prioritize longer, more specific phrases biggest phrase wins, ruling out the general credit biasedness.
+        scores[topic] = score
+
+        for boost_word in BOOST_WORDS.get(topic, []):
+            if boost_word in text:
+                score += 2
+
+        scores[topic] = score
+
+    best_topic = max(scores, key=scores.get)
+    best_score = scores[best_topic]
+    total = sum(scores.values())
+
+    if best_score < 2:
+        return "general_credit", 0.2
+
+    confidence = best_score / (total if total else 1)
+    return best_topic, confidence
+
+
+
+
+# ===========================================================================
+# LAYER 3 — REASONING LOGIC
+# Applies rules to produce warnings, recommended actions, and tradeoffs
+# ===========================================================================
+
+def apply_reasoning(intent: str, topic_key: str | None, score: int | None, signals: dict = None) -> dict:
+    """
+    Given the intent + topic + user's score, returns a reasoning block:
+    {
+      primary_action, secondary_action, warning,
+      cause_effect, timeframe, recommendation,
+      pro, con, better_alternative, root_cause
+    }
+    """
+
+    result = {}
+
+    # -----------------------------
+    # Rule Lookup (Intent + Topic)
+    # -----------------------------
+    rule_key = f"{intent}:{topic_key}" if topic_key else None
+    rule = REASONING_RULES.get(rule_key, {})
+    result.update(rule)
+
+    # -----------------------------
+    # Score-Based Personalization
+    # -----------------------------
+    if score is not None:
+        # ===== IMPROVE / DIAGNOSE =====
+        if intent in ["improve", "diagnose"]:
+
+            active_issues = (
+                    signals.get("collections") == "yes"
+                    or signals.get("missed_payments") == "yes"
+                    or signals.get("high_utilization") == "yes"
+                    or topic_key in ("collections_first", "payment_history")
+            )
+
+            if active_issues:
+                    result["urgency_note"] = (
+                    f"Even with a {score}, these issues are actively dragging your score. "
+                    f"The plan below targets exactly what's hurting you right now."
+                )
+
+
+
+            if score <= 580:
+                result["primary_action"] = (
+                    f"First off honesty is key a score of {score} is not where anyone wants to be.\n\n"
+                    "But the good news is you can recover from this.\n\n"
+                    "The fastest wins for someone with you credit profile will most certainly come from from:\n"
+                    "- Fixing any payment history issues you have.\n"
+                    "- Disputing errors within your account which could have caused the decrease.\n\n"
+                    "Remember what's important at this stage is you take action towards the small steps. \n\n"
+                    "But I recommend you keep your main focus on these steps..."
+                )
+
+            elif score < 740:
+                result["urgency_note"] = (
+                    f"With a score of {score},  your system is already working well.\n\n"
+                    "To break into the 750+ (A+ tier) zone your best options are:\n"
+                    "- Get utilization under 10%\n"
+                    "- Maintain 12 months of clean history\n\n"
+                    "While these help, I'd recommend you remember remember these steps..."
+                )
+
+            else:
+                result["urgency_note"] = (
+                    f"A {score} is an impressive place to be.\n\n"
+                    "But to keep it at this level, I recommend you build for protection by doing things like:\n"
+                    "- Keeping utilization under 10%\n"
+                    "- Avoiding unnecessary accounts\n"
+                    "- Being patient, and knowing that time will most certainly do the rest. \n\n"
+                    "Stick to these simple steps..."
+                )
+
+        # ===== DECISION =====
+        if intent == "decide":
+
+            if score >= 610:
+                result["urgency_note"] = (
+                    "Now at this stage you might be wondering:\n"
+                    "“Should I close this card?” 💭\n\n"
+                    "Short answer: don’t.\n\n"
+                    "Instead:\n"
+                    "- Focus on paying down interest\n"
+                    "- Start with the highest interest card\n"
+                    "- Go one at a time\n\n"
+                    "Slow and consistent wins here."
+                )
+
+            elif 620 < score < 800:
+                result["urgency_note"] = (
+                    f"You're in a strong position with a score of {score}.\n\n"
+                    "Now it's about discipline to push higher:\n\n"
+                    "1. Never miss payments (autopay helps)\n"
+                    "2. Avoid spending that creates future stress\n"
+                    "3. Keep utilization under 30%\n\n"
+                    "This is where good habits turn into elite results."
+                )
+
+            else:
+                result["primary_action"] = (
+                    "Pause for a second — seriously.\n\n"
+                    "You're operating at an elite level (top 0.01%).\n\n"
+                    "At this point:\n"
+                    "- Don’t overcomplicate things\n"
+                    "- Stay consistent\n"
+                    "- Protect your foundation\n\n"
+                    "Keep your rhythm and let the system reward you. 🕊️"
+                )
+
+        if topic_key in SCORE_SIMULATION_RANGES:
+
+            result["projection_topic"] = topic_key
+
+            # Decide the direct projection to give when the topic key is a specific value.
+            if topic_key == "utilization":
+                if score >= 740:
+
+                    result["projection_scenario"] = "slight_reduce"
+                elif score >= 620:
+                    result["projection_scenario"] = "mid_to_low"
+                else:
+                    result["projection_scenario"] = "high_to_low"
+
+            elif topic_key == "collections":
+                result["projection_scenario"] = "pay_for_delete"
+
+            elif topic_key == "payment_history":
+                result["projection_scenario"] = "clean_streak"
+
+            elif topic_key == "build_from_zero":
+                result["projection_scenario"] = "secured_card"
+
+            elif topic_key == "collections":
+                result["projection_scenario"] = "pay_for_delete"
+                result["projection_topic"] = "collections"
+
+
+
+
+
+    return result
+
+
+
+
+# ===========================================================================
+# LAYER 5 — FEEDBACK LOOP
+# Tracks what topics and intents are being used to refine future responses
+# ===========================================================================
+
+def record_feedback(session: dict, intent: str, topic_key: str | None, was_helpful: bool | None = None):
+    """
+    Appends to the session feedback log.
+    was_helpful can be True/False from an explicit thumbs up/down,
+    or None if we're just tracking usage.
+    """
+    session["feedback"].append({
+        "timestamp": datetime.datetime.now().isoformat(),
+        "intent": intent,
+        "topic": topic_key,
+        "helpful": was_helpful,
+        "stage": session["stage"],
+    })
+    # Keep only the last 20 feedback entries
+    if len(session["feedback"]) > 20:
+        session["feedback"] = session["feedback"][-20:]
+
+
+def get_feedback_summary(session: dict) -> dict:
+    """
+    Returns a simple summary of what's been discussed and what landed.
+    Used internally — not shown to user.
+    """
+    feedback = session.get("feedback", [])
+    if not feedback:
+        return {}
+
+    topics = [f["topic"] for f in feedback if f["topic"]]
+    intents = [f["intent"] for f in feedback if f["intent"]]
+
+    return {
+        "most_discussed_topic": max(set(topics), key=topics.count) if topics else None,
+        "primary_intent": max(set(intents), key=intents.count) if intents else None,
+        "total_turns": len(feedback),
+    }
+
+
+# ===========================================================================
+# HELPERS
+# ===========================================================================
+
+def _detect_credit_emotion(text: str) -> str | None:
+    text_lower = text.lower()
+    scores = {}
+    for emotion, signals in CREDIT_EMOTIONAL_SIGNALS.items():
+        hits = sum(1 for s in signals if s in text_lower)
+        if hits:
+            scores[emotion] = hits
+    return max(scores, key=scores.get) if scores else None
+
+
+def _get_credit_opener(emotion: str, text: str) -> str:
+    if emotion not in CREDIT_OPENERS:
+        return ""
+    options = CREDIT_OPENERS[emotion]
+    idx = int(hashlib.md5(text.encode()).hexdigest(), 16) % len(options)
+    return options[idx]
+
+
+def _extract_credit_score(text: str) -> int | None:
+    patterns = [
+        r"(?:my score is|score of|i have a|score:|credit score is|at)\s*(\d{3})",
+        r"\b([3-8]\d{2})\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text.lower())
+        if match:
+            score = int(match.group(1))
+            if 300 <= score <= 850:
+                return score
+    return None
+
+
+def _score_to_stage_advice(score: int) -> str:
+    if score >= 800:
+        return (
+            f"A {score} is exceptional, congrats your in the top tier of credit users. "
+            "Focus now shifts from building, to strategy: best mortgage rates, "
+            "premium cards, negotiating power. These are all important factors to take"
+            "into account. What are you trying to do with it?"
+        )
+    elif score >= 740:
+        return (
+            f"A {score} is very good. The gap to 800+ is usually just time and utilization. "
+            "Keep utilization under 10%, keep all payments on time. "
+            "Anything specific you're working toward?"
+        )
+    elif score >= 670:
+        return (
+            f"A {score} is good, but you can do better towards building your solid foundation, real room to grow. "
+            "The jump to 740+ usually comes down to utilization under 10% "
+            "and 12–18 more months of clean history. "
+            "What's your utilization looking like?"
+        )
+    elif score >= 580:
+        return (
+            f"A {score} is fair, focus on but paying more than you should. "
+            " The fastest wins are pay down high-balance cards, setting autopay on everything. "
+            "Do you know which factor is hurting you most?"
+        )
+    else:
+        return (
+            f"A {score} is tough — but it's never to late to make a comeback. What would you say is holding you back: "
+            "Any collections? Any recent missed payments? "
+            "Tell me what's on there and I'll tell you exactly what to attack first."
+        )
+
+
+def _recommend_audiobook(text: str, session: dict) -> dict | None:
+    text_lower = text.lower()
+
+    for book in CREDIT_AUDIOBOOKS:
+        if any(focus in text_lower for focus in book["focus"]):
+            return book
+    last_topic = session.get("last_topic", "")
+    if last_topic in ("build_from_zero", "secured_card", "inquiries", "utilization", "credit_age"):
+        return CREDIT_AUDIOBOOKS[1]
+    return None
+
+
+# Note - expanded the is follow-up logic, so I don't turn into the elaboration kicking in when I ask a question, instead it has more tight guards to read keywords.
+def _is_follow_up(text: str) -> bool:
+    text_lower = text.lower().strip()
+    words = set(text_lower.split())
+
+    # Block anything that looks like a new question
+    question_starters = (
+        "what", "whats", "what's", "how", "why", "where", "when",
+        "who", "which", "is", "are", "can", "does", "do", "explain what",
+        "tell", "define", "give"
+    )
+    first_word = text_lower.split()[0] if text_lower.split() else ""
+    if first_word in question_starters:
+        return False  # ← new question, not a follow-up
+
+    # existing blockers for follow-up logic so WRIN doesn't always return definitions.
+    if any(opener in text_lower for opener in (
+        "right", "okay", "got it", "mhm",
+        "explain that", "I see", "umm", "well", "err", "wow okay",
+        "tell me more", "what does that mean", "here's what I heard you say"
+    )):
+        return False
+
+    return any(
+        trigger if " " in trigger else trigger in words
+        for trigger in FOLLOW_UP_TRIGGERS
+    )
+
+
+# ===========================================================================
+# SAVE / LOAD
+# ===========================================================================
+
+
+def make_json_safe(obj):
+    if isinstance(obj, dict):
+        return {k: make_json_safe(v) for k, v in obj.items()
+                if not callable(v)}
+    elif isinstance(obj, list):
+        return [make_json_safe(i) for i in obj if not callable(i)]
+    elif callable(obj):
+        return None
+    return obj
+
+
+def save_credit_data():
+    with open("wrin_credit_data.json", "w") as f:
+        json.dump({
+            "sessions": {
+                k: {ik: iv for ik, iv in v.items()
+                    if isinstance(iv, (str, int, float, list, dict, bool, type(None)))}
+                for k, v in user_credit_sessions.items()
+            },
+        }, f, indent=2)
+
+
+def load_credit_data():
+    try:
+        with open("wrin_credit_data.json", "r") as f:
+            data = json.load(f)
+            user_credit_sessions.update(data.get("sessions", {}))
+    except FileNotFoundError:
+        pass
+
+
+# ===========================================================================
+# MAIN ENTRY POINT
+# Full pipeline: Intent → Concept → Reasoning → Response → Feedback
+# ===========================================================================
+
+
+def get_credit_opening(user_name: str) -> dict:
+    return handle_credit_message(user_name, "")
+
+
+def get_credit_audiobooks() -> list:
+    return CREDIT_AUDIOBOOKS
