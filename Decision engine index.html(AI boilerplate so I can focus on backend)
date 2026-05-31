@@ -1,0 +1,1461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <title>WRIN — Financial Literacy</title>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+:root {
+  --green:#00C48C;--green-light:#E6FAF5;--green-mid:#B2EDD8;
+  --blue:#3B82F6;--blue-light:#EFF6FF;--amber:#F59E0B;--amber-light:#FFFBEB;
+  --credit:#8B5CF6;--credit-light:#F5F3FF;--credit-mid:#C4B5FD;
+  --bg:#F7F9FC;--surface:#FFFFFF;--border:#E2E8F0;--text:#1E293B;--muted:#64748B;
+  --radius:16px;--shadow:0 2px 12px rgba(0,0,0,0.06),0 1px 3px rgba(0,0,0,0.04);--shadow-lg:0 8px 30px rgba(0,0,0,0.10);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html,body{font-family:'Nunito',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;}
+
+/* ── INTRO ── */
+#introScreen{position:fixed;inset:0;z-index:9999;background:linear-gradient(135deg,#0F172A 0%,#1E3A5F 50%,#0F2027 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity 1.2s ease;overflow:hidden;}
+#introCanvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
+#introContent{position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;gap:0;text-align:center;width:100%;max-width:440px;padding:0 24px;}
+#introScreen.fade-out{opacity:0;pointer-events:none;}
+#statScreen{display:flex;flex-direction:column;align-items:center;gap:12px;transition:opacity 0.6s ease;min-height:200px;justify-content:center;margin-bottom:32px;}
+.stat-accent{width:28px;height:3px;border-radius:2px;background:#00C48C;opacity:0.6;margin-bottom:4px;}
+.stat-number{font-family:'Space Grotesk',sans-serif;font-size:clamp(52px,12vw,72px);font-weight:700;color:#fff;line-height:1;letter-spacing:-0.02em;}
+.stat-number span{color:#00C48C;}
+.stat-text{font-size:1rem;color:rgba(255,255,255,0.6);max-width:320px;line-height:1.6;font-weight:600;}
+.stat-source{font-size:0.72rem;color:rgba(255,255,255,0.3);letter-spacing:0.08em;text-transform:uppercase;font-weight:700;}
+.stat-dots{display:flex;gap:7px;margin-top:4px;}
+.stat-dot{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,0.2);transition:background 0.3s;}
+.stat-dot.active{background:#00C48C;}
+.skip-link{font-size:0.72rem;color:rgba(255,255,255,0.25);cursor:pointer;background:none;border:none;font-family:'Nunito',sans-serif;font-weight:700;text-decoration:underline;margin-top:-4px;}
+.skip-link:hover{color:rgba(255,255,255,0.5);}
+#wrinFace{display:flex;flex-direction:column;align-items:center;gap:10px;opacity:0;transform:scale(0) rotate(-20deg);transition:opacity 0.6s ease,transform 0.6s cubic-bezier(0.34,1.56,0.64,1);margin-bottom:20px;}
+#wrinFace.visible{opacity:1;transform:scale(1) rotate(0deg);}
+#wrinFace.tilted{transform:scale(1) rotate(-9deg) translateX(4px);transition:transform 0.8s cubic-bezier(0.68,-0.55,0.27,1.55);}
+.wrin-eyes{display:flex;gap:22px;}
+.wrin-eye{width:18px;height:18px;background:#00C48C;border-radius:50%;box-shadow:0 0 8px #00C48C,0 0 20px rgba(0,196,140,0.6);animation:eyeBlink 4s infinite,eyePulse 2s infinite ease-in-out;}
+.wrin-eye:nth-child(2){animation-delay:1.8s,0.5s;}
+@keyframes eyeBlink{0%,88%,100%{transform:scaleY(1);}94%{transform:scaleY(0.08);}}
+@keyframes eyePulse{0%,100%{box-shadow:0 0 8px #00C48C,0 0 20px rgba(0,196,140,0.6);}50%{box-shadow:0 0 14px #00C48C,0 0 40px rgba(0,196,140,0.8),0 0 60px rgba(0,196,140,0.3);}}
+.wrin-smile{width:30px;height:12px;border-bottom:3px solid #00C48C;border-radius:0 0 50px 50px;opacity:0;box-shadow:0 4px 12px rgba(0,196,140,0.6);transform:scaleX(0.3);transition:opacity 0.5s ease,transform 0.5s cubic-bezier(0.34,1.56,0.64,1);}
+.wrin-smile.visible{opacity:1;transform:scaleX(1);}
+#nameArea{display:flex;flex-direction:column;align-items:center;gap:14px;width:100%;opacity:0;transform:translateY(16px);transition:opacity 0.6s ease,transform 0.6s ease;}
+#nameArea.visible{opacity:1;transform:translateY(0);}
+.intro-label{font-family:'Space Grotesk',sans-serif;font-size:clamp(1.4rem,4vw,1.9rem);font-weight:700;color:#fff;letter-spacing:-0.02em;}
+.intro-label span{background:linear-gradient(90deg,#00C48C,#3B82F6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.intro-sub{font-size:0.88rem;color:rgba(255,255,255,0.45);font-weight:600;}
+.name-input-wrap{display:flex;flex-direction:column;gap:10px;width:100%;max-width:340px;}
+.name-input-wrap input{width:100%;padding:13px 16px;font-size:0.95rem;font-family:'Nunito',sans-serif;font-weight:700;background:rgba(255,255,255,0.08);border:1.5px solid rgba(255,255,255,0.15);border-radius:12px;color:#fff !important;outline:none;transition:border-color 0.2s,background 0.2s;}
+.name-input-wrap input::placeholder{color:rgba(255,255,255,0.35);font-weight:500;}
+.name-input-wrap input:focus{border-color:#00C48C;background:rgba(0,196,140,0.08) !important;box-shadow:0 0 0 3px rgba(0,196,140,0.15);}
+.name-input-wrap button{width:100%;padding:13px 20px;font-size:0.95rem;font-family:'Nunito',sans-serif;font-weight:800;background:linear-gradient(135deg,#00C48C,#00A876);color:#fff;border:none;border-radius:12px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;box-shadow:0 4px 14px rgba(0,196,140,0.4);}
+.name-input-wrap button:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(0,196,140,0.5);}
+.intro-disclaimer{font-size:0.7rem;color:rgba(255,255,255,0.25);font-weight:600;letter-spacing:0.02em;}
+
+
+/* List CSS code */
+.credit-faq-section {
+    font-family: sans-serif;
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* Styles the actual H2 tags */
+.credit-faq-section h2 {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #1a202c;
+    margin-top: 2rem;
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    border-bottom: 2px solid #e2e8f0;
+    padding-bottom: 4px;
+}
+
+/* Styles the list container */
+.credit-faq-section ul {
+    list-style-type: none; /* Removes default dots if you prefer custom spacing */
+    padding-left: 0;
+    margin-bottom: 1.5rem;
+}
+
+/* Styles individual question lines */
+.credit-faq-section li {
+    margin-bottom: 0.5rem;
+    color: #4a5568;
+    line-height: 1.5;
+}
+
+/* Styles the target action plan text */
+.credit-faq-section li span {
+    font-weight: 600;
+    color: #3182ce; /* Makes the action plan pop in blue */
+}
+
+
+
+
+/* ── MAIN ── */
+main{display:none;flex-direction:column;align-items:center;min-height:100vh;padding:0 0 60px;}
+main.visible{display:flex;}
+.app-header{width:100%;background:var(--surface);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:100;box-shadow:0 1px 8px rgba(0,0,0,0.04);}
+.header-logo{width:42px;height:42px;background:linear-gradient(135deg,#00C48C,#3B82F6);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
+.header-text h1{font-family:'Space Grotesk',sans-serif;font-size:1.15rem;font-weight:700;color:var(--text);}
+.header-text p{font-size:0.78rem;color:var(--muted);font-weight:500;}
+#headerGreeting{margin-left:auto;font-size:0.85rem;font-weight:700;color:var(--green);background:var(--green-light);padding:6px 14px;border-radius:20px;display:none;}
+.page-section{width:100%;max-width:680px;padding:0 16px;margin-top:32px;}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:28px 24px;width:100%;}
+.card-title{font-family:'Space Grotesk',sans-serif;font-size:1.25rem;font-weight:700;color:var(--text);margin-bottom:6px;}
+.card-sub{font-size:0.875rem;color:var(--muted);line-height:1.6;margin-bottom:20px;}
+.welcome-emoji{font-size:3rem;margin-bottom:12px;}
+.input-label{display:block;font-size:0.8rem;font-weight:700;color:var(--muted);letter-spacing:0.06em;text-transform:uppercase;margin-bottom:6px;}
+input[type="text"],textarea,select{width:100%;padding:13px 16px;font-size:0.95rem;font-family:'Nunito',sans-serif;font-weight:600;background:var(--bg);border:1.5px solid var(--border);border-radius:12px;color:var(--text);outline:none;transition:border-color 0.2s,box-shadow 0.2s;}
+input:focus,textarea:focus,select:focus{border-color:var(--green);box-shadow:0 0 0 3px rgba(0,196,140,0.12);background:#fff;}
+input::placeholder,textarea::placeholder{color:#A0AABB;font-weight:500;}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:14px 22px;font-size:0.95rem;font-family:'Nunito',sans-serif;font-weight:800;border-radius:12px;cursor:pointer;border:none;transition:all 0.2s ease;width:100%;}
+.btn:disabled{opacity:0.4;cursor:wait;}
+.btn-primary{background:linear-gradient(135deg,#00C48C,#00A876);color:#fff;box-shadow:0 4px 14px rgba(0,196,140,0.35);}
+.btn-primary:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 6px 20px rgba(0,196,140,0.45);}
+.btn-outline{background:transparent;color:var(--green);border:2px solid var(--green);}
+.btn-outline:hover:not(:disabled){background:var(--green-light);}
+#response{width:100%;padding:16px;background:var(--green-light);border:1.5px solid var(--green-mid);border-radius:12px;font-size:0.9rem;font-weight:600;color:#065F46;line-height:1.7;display:none;}
+
+/* ── MODE GRID — main two buttons ── */
+.mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;}
+.mode-btn{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:18px 16px;background:var(--surface);border:2px solid var(--border);border-radius:14px;cursor:pointer;transition:all 0.2s ease;text-align:left;width:100%;font-family:'Nunito',sans-serif;}
+.mode-btn:hover{border-color:var(--green);background:var(--green-light);transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,196,140,0.15);}
+.mode-btn.active{border-color:var(--green);background:var(--green-light);box-shadow:0 0 0 3px rgba(0,196,140,0.15);}
+.mode-btn .mode-icon{font-size:1.8rem;}
+.mode-btn .mode-name{font-weight:800;font-size:0.95rem;color:var(--text);}
+.mode-btn .mode-desc{font-size:0.75rem;color:var(--muted);font-weight:600;line-height:1.4;}
+
+/* ── FINANCE CONCEPT WHEEL ── */
+#financeConceptPanel{
+  display:none;
+  width:100%;
+  margin-top:16px;
+  animation:slideDown 0.35s cubic-bezier(0.4,0,0.2,1);
+}
+@keyframes slideDown{from{opacity:0;transform:translateY(-10px);}to{opacity:1;transform:translateY(0);}}
+
+.concept-wheel-label{
+  font-size:0.78rem;font-weight:800;color:var(--muted);
+  letter-spacing:0.06em;text-transform:uppercase;
+  margin-bottom:12px;padding-left:2px;
+}
+
+/* The wheel row — circles */
+.concept-wheel{
+  display:flex;
+  gap:16px;
+  align-items:center;
+  padding:4px 0 8px;
+  overflow-x:auto;
+  scrollbar-width:none;
+  -ms-overflow-style:none;
+}
+.concept-wheel::-webkit-scrollbar{display:none;}
+
+/* Each circle node */
+.concept-node{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:7px;
+  cursor:pointer;
+  flex-shrink:0;
+  transition:transform 0.2s ease;
+}
+.concept-node:hover{transform:translateY(-3px);}
+.concept-node:hover .concept-circle{box-shadow:0 6px 20px rgba(0,0,0,0.15);}
+
+.concept-circle{
+  width:62px;height:62px;
+  border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:1.5rem;
+  border:2.5px solid transparent;
+  transition:all 0.25s ease;
+  position:relative;
+}
+.concept-circle::after{
+  content:'';
+  position:absolute;
+  inset:-3px;
+  border-radius:50%;
+  border:2px solid transparent;
+  transition:border-color 0.25s ease;
+}
+.concept-node.active .concept-circle::after{
+  border-color:currentColor;
+  opacity:0.4;
+}
+.concept-node.active .concept-circle{
+  transform:scale(1.08);
+}
+
+/* Credit score — purple */
+.concept-circle.credit{
+  background:linear-gradient(135deg,#F5F3FF,#EDE9FE);
+  border-color:#C4B5FD;
+  color:#7C3AED;
+}
+.concept-node.active.credit-node .concept-circle{
+  background:linear-gradient(135deg,#7C3AED,#6D28D9);
+  border-color:#5B21B6;
+  color:#fff;
+  box-shadow:0 4px 20px rgba(124,58,237,0.4);
+}
+
+/* Coming soon nodes — greyed */
+.concept-circle.coming-soon{
+  background:var(--bg);
+  border-color:var(--border);
+  border-style:dashed;
+  color:var(--muted);
+  opacity:0.6;
+}
+.concept-node.coming-soon-node{cursor:default;}
+.concept-node.coming-soon-node:hover{transform:none;}
+.concept-node.coming-soon-node:hover .concept-circle{box-shadow:none;}
+
+.concept-label{
+  font-size:0.7rem;font-weight:800;
+  color:var(--muted);text-align:center;
+  line-height:1.2;max-width:68px;
+  transition:color 0.2s;
+}
+.concept-node.active .concept-label{color:var(--text);}
+
+/* Soon badge */
+.soon-badge{
+  font-size:0.58rem;font-weight:800;
+  background:var(--border);color:var(--muted);
+  border-radius:6px;padding:1px 5px;
+  letter-spacing:0.05em;text-transform:uppercase;
+}
+
+/* ── CREDIT MODE CHAT ── */
+#creditChatSection{
+  display:none;
+  flex-direction:column;
+  align-items:center;
+  width:100%;
+  max-width:560px;
+  margin:0 auto;
+  padding:0 16px;
+  margin-top:16px;
+  animation:fadeUp 0.4s ease;
+}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
+
+.credit-chat-header{
+  display:flex;align-items:center;gap:10px;margin-bottom:12px;width:100%;
+}
+.credit-chat-icon{
+  width:38px;height:38px;
+  background:linear-gradient(135deg,#7C3AED,#6D28D9);
+  border-radius:11px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;
+  box-shadow:0 3px 12px rgba(124,58,237,0.35);
+}
+.credit-chat-name{font-weight:800;font-size:1rem;color:var(--text);}
+.credit-chat-status{font-size:0.75rem;color:var(--credit);font-weight:700;}
+
+
+.credit-bubble-wrap{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  overflow:visible;
+  box-shadow:var(--shadow);
+  width: 240%;
+}
+
+#creditChatContainer{
+  display:flex;flex-direction:column;gap:0;
+  min-height:65vh;max-height:75vh;
+  overflow-y:auto;padding:16px;
+  scroll-behavior:smooth;
+}
+#creditChatContainer::-webkit-scrollbar{width:4px;}
+#creditChatContainer::-webkit-scrollbar-thumb{background:var(--credit-mid);border-radius:4px;}
+
+/* Credit bubbles — purple tint */
+.credit-wrin-msg{display:flex;gap:10px;margin-bottom:14px;align-items:flex-start;}
+.credit-avatar{
+  width:30px;height:30px;flex-shrink:0;
+  background:linear-gradient(135deg,#7C3AED,#6D28D9);
+  border-radius:8px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;
+}
+.credit-bubble{
+  background:var(--credit-light);
+  border:1px solid var(--credit-mid);
+  border-radius:4px 14px 14px 14px;
+  padding:12px 14px;
+  font-size:0.88rem;font-weight:600;
+  line-height:1.75;color:var(--text);
+  max-width: 85%;
+  white-space: pre-wrap;
+}
+
+
+
+.credit-bubble.typing{color:var(--muted);}
+
+/* User bubble stays green */
+.credit-user-wrap{display:flex;justify-content:flex-end;margin-bottom:14px;}
+.credit-user-bubble{
+  background:linear-gradient(135deg,#7C3AED,#6D28D9);
+  color:#fff;
+  border-radius:14px 4px 14px 14px;
+  padding:10px 14px;
+  font-size:0.88rem;font-weight:700;
+  max-width:80%;
+}
+
+.credit-input-row{
+  display:flex;gap:8px;align-items:center;
+  padding:12px 14px;
+  border-top:1px solid var(--border);
+  background:var(--surface);
+  border-radius:0 0 var(--radius) var(--radius);
+}
+.credit-input-row input{flex:1;margin:0;padding:11px 14px;font-size:0.9rem;}
+.credit-input-row input:focus{border-color:var(--credit);box-shadow:0 0 0 3px rgba(124,58,237,0.12);}
+.credit-send-btn{
+  width:auto;padding:11px 18px;flex-shrink:0;
+  border-radius:10px;
+  background:linear-gradient(135deg,#7C3AED,#6D28D9);
+  color:#fff;font-weight:800;font-size:0.85rem;
+  border:none;cursor:pointer;
+  transition:all 0.2s;
+  font-family:'Nunito',sans-serif;
+  box-shadow:0 3px 10px rgba(124,58,237,0.3);
+}
+.credit-send-btn:hover{transform:scale(1.03);box-shadow:0 4px 14px rgba(124,58,237,0.45);}
+.credit-send-btn:disabled{opacity:0.4;cursor:wait;}
+
+/* Book nudge card */
+.book-nudge{
+  margin:8px 0 8px 40px;
+  background:linear-gradient(135deg,#F5F3FF,#EDE9FE);
+  border:1.5px solid var(--credit-mid);
+  border-radius:12px;
+  padding:12px 14px;
+  display:flex;align-items:center;gap:10px;
+  cursor:pointer;
+  transition:all 0.2s;
+}
+.book-nudge:hover{border-color:#7C3AED;transform:translateX(2px);}
+.book-nudge-icon{font-size:1.2rem;flex-shrink:0;}
+.book-nudge-text{font-size:0.8rem;font-weight:700;color:#5B21B6;line-height:1.4;}
+.book-nudge-arrow{margin-left:auto;color:#7C3AED;font-weight:800;font-size:1rem;flex-shrink:0;}
+
+/* Credit hint */
+.credit-hint{
+  text-align:center;font-size:0.75rem;font-weight:700;
+  color:var(--credit);
+  background:var(--credit-light);
+  border:1px solid var(--credit-mid);
+  border-radius:20px;padding:5px 14px;
+  display:inline-block;margin:8px auto 0;
+}
+
+/* ── OLD BUDGET CHAT ── */
+#chatSection{display:none;flex-direction:column;align-items:center;width:100%;margin-left:auto;margin-right:auto;}
+#chatSection.expanded{max-width:96vw;}
+.chat-header{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+.chat-header-icon{width:36px;height:36px;background:linear-gradient(135deg,#00C48C,#3B82F6);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;}
+.chat-header-name{font-weight:800;font-size:1rem;}.chat-header-status{font-size:0.75rem;color:var(--green);font-weight:700;}
+.chat-bubble-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:visible;box-shadow:var(--shadow);}
+#budgetChatContainer{display:flex;flex-direction:column;gap:0;min-height:65vh;max-height:75vh;overflow-y:auto;padding:16px;scroll-behavior:smooth;}
+#budgetChatContainer::-webkit-scrollbar{width:4px;}#budgetChatContainer::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+.wrin-msg{display:flex;gap:10px;margin-bottom:14px;align-items:flex-start;}
+.wrin-avatar{width:30px;height:30px;flex-shrink:0;background:linear-gradient(135deg,#00C48C,#3B82F6);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;}
+.wrin-bubble{background:var(--bg);border:1px solid var(--border);border-radius:4px 14px 14px 14px;padding:12px 14px;font-size:0.88rem;font-weight:600;line-height:1.75;color:var(--text);max-width:85%;}
+.wrin-bubble.typing{color:var(--muted);}
+.user-msg-wrap{display:flex;justify-content:flex-end;margin-bottom:14px;}
+.user-bubble{background:linear-gradient(135deg,#00C48C,#00A876);color:#fff;border-radius:14px 4px 14px 14px;padding:10px 14px;font-size:0.88rem;font-weight:700;max-width:80%;}
+.chat-input-row{display:flex;gap:8px;align-items:center;padding:12px 14px;border-top:1px solid var(--border);background:var(--surface);}
+.chat-input-row input{flex:1;margin:0;padding:11px 14px;font-size:0.9rem;}
+.chat-send-btn{width:auto;padding:11px 18px;flex-shrink:0;border-radius:10px;background:var(--green);color:#fff;font-weight:800;font-size:0.85rem;border:none;cursor:pointer;transition:all 0.2s;font-family:'Nunito',sans-serif;}
+.chat-send-btn:hover{background:#00A876;transform:scale(1.03);}
+.chat-send-btn:disabled{opacity:0.4;cursor:wait;}
+#budget-progress-container{width:100%;max-width:560px;padding:0 16px;margin-top:12px;transition:max-width 0.5s cubic-bezier(0.4,0,0.2,1);}
+#budget-progress-container.expanded{max-width:96vw;}
+.progress-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;box-shadow:var(--shadow);}
+.progress-label{font-size:0.8rem;font-weight:800;color:var(--muted);letter-spacing:0.05em;text-transform:uppercase;margin-bottom:8px;display:flex;justify-content:space-between;}
+.progress-label span{color:var(--green);}
+.progress-bar{width:100%;height:14px;background:var(--bg);border:1px solid var(--border);border-radius:99px;overflow:hidden;}
+.progress-fill{height:100%;background:linear-gradient(90deg,#00C48C,#3B82F6);border-radius:99px;width:0%;transition:width 0.9s cubic-bezier(0.4,0,0.2,1);display:flex;align-items:center;justify-content:flex-end;padding-right:6px;font-size:9px;font-weight:800;color:#fff;}
+
+/* Feedback */
+#feedback-section{display:none;width:100%;}#feedback-section .card-title{font-size:1.1rem;}
+.feedback-btns{display:flex;gap:10px;margin-bottom:16px;}
+.feedback-thumb{flex:1;padding:12px;border:2px solid var(--border);border-radius:12px;background:var(--bg);font-size:1.5rem;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;align-items:center;gap:4px;font-family:'Nunito',sans-serif;}
+.feedback-thumb span{font-size:0.75rem;font-weight:700;color:var(--muted);}
+.feedback-thumb.selected-yes{border-color:var(--green);background:var(--green-light);}
+.feedback-thumb.selected-no{border-color:#EF4444;background:#FEF2F2;}
+.feedback-thumb:hover{transform:scale(1.04);}
+#feedback-response{font-size:0.88rem;font-weight:700;margin-top:10px;min-height:1.5em;}
+.menu-list{display:flex;flex-direction:column;gap:8px;width:100%;}
+.menu-item{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--bg);border:1.5px solid var(--border);border-radius:12px;cursor:pointer;transition:all 0.18s ease;text-align:left;font-family:'Nunito',sans-serif;width:100%;box-shadow:0 1px 3px rgba(0,0,0,0.04);}
+.menu-item:hover{border-color:var(--green);background:var(--green-light);transform:translateX(3px);box-shadow:0 2px 10px rgba(0,196,140,0.15);}
+.menu-item-icon{font-size:1.3rem;flex-shrink:0;}.menu-item-text{font-size:0.92rem;font-weight:800;color:var(--text);}
+.hint-pill{text-align:center;font-size:0.78rem;font-weight:700;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:5px 14px;display:inline-block;margin:8px auto 0;}
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;margin-top:12px;box-shadow:var(--shadow);}
+.chart-title{font-family:'Space Grotesk',sans-serif;font-size:0.9rem;font-weight:700;color:var(--muted);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:10px;}
+.sp-card{background:linear-gradient(135deg,#EFF6FF,#E0F2FE);border:1.5px solid #BFDBFE;border-radius:14px;padding:16px;margin-top:12px;}
+#modeResponse{width:100%;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:12px;font-size:0.9rem;font-weight:600;color:var(--text);line-height:1.75;white-space:pre-wrap;word-wrap:break-word;overflow-y:auto;max-height:320px;user-select:text;}
+#modeSection{display:none;width:100%;}#modeUIContainer{display:flex;flex-direction:column;align-items:center;width:100%;}
+.video-wrapper{width:100%;margin:10px 0;border:1px solid var(--border);border-radius:12px;overflow:visible;background:var(--bg);}
+.video-title-bar{padding:8px 14px;font-size:0.78rem;font-weight:800;color:var(--blue);letter-spacing:0.04em;border-bottom:1px solid var(--border);background:var(--blue-light);}
+.video-qa-section{padding:10px 14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;}
+.video-qa-display{font-size:12px;color:var(--text);font-weight:600;line-height:1.6;min-height:20px;white-space:pre-wrap;}
+.video-qa-row{display:flex;gap:8px;align-items:center;}
+.video-qa-input{flex:1;padding:8px 12px;font-size:12px;border:1.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:'Nunito',sans-serif;font-weight:600;}
+.video-qa-btn{padding:8px 14px;font-size:0.8rem;font-weight:800;background:var(--blue);color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:'Nunito',sans-serif;white-space:nowrap;}
+#translatedText{padding:12px 14px;background:var(--green-light);border:1px solid var(--green-mid);border-radius:10px;font-size:0.9rem;font-weight:600;color:#065F46;min-height:40px;white-space:pre-wrap;}
+.task{margin-bottom:10px;}.task p{font-size:0.82rem;font-weight:700;color:var(--text);margin-bottom:4px;}
+
+/* Hidden stuff */
+#bookCategoryGroup,#bookTypeGroup,#translationOptions,#tidyingInstructions,#video-info,#queryInputGroup,#modeTextInputGroup{display:none;}
+input,textarea{color:var(--text) !important;}
+
+@media(max-width:480px){
+  .mode-grid{grid-template-columns:1fr;}
+  .card{padding:20px 16px;}
+  .app-header{padding:12px 16px;}
+  #headerGreeting{display:none !important;}
+  .concept-circle{width:54px;height:54px;font-size:1.3rem;}
+}
+  </style>
+</head>
+<body>
+
+<!-- INTRO -->
+<div id="introScreen">
+  <canvas id="introCanvas"></canvas>
+  <div id="introContent">
+    <div id="statScreen">
+      <div class="stat-accent"></div>
+      <div class="stat-number" id="statNum"> in 2024 73<span>%</span > of americans..</div>
+      <div class="stat-text" id="statTxt">Couldn't answer a basic financial literacy question. </div>
+      <div class="stat-source" id="statSrc">FINRA Foundation June - October 2024</div>
+      <div class="stat-dots">
+        <div class="stat-dot active" id="sd0"></div>
+        <div class="stat-dot" id="sd1"></div>
+        <div class="stat-dot" id="sd2"></div>
+      </div>
+      <button class="skip-link" onclick="skipToFace()">skip</button>
+    </div>
+    <div id="wrinFace">
+      <div class="wrin-eyes">
+        <div class="wrin-eye"></div>
+        <div class="wrin-eye"></div>
+      </div>
+      <div class="wrin-smile" id="wrinSmile"></div>
+    </div>
+    <div id="nameArea">
+      <div class="intro-label">I'm <span>WRIN</span></div>
+      <div class="intro-sub">Your financial coach. What's your name?</div>
+      <div class="name-input-wrap">
+        <input type="text" id="introNameInput" placeholder="Enter your name..." autocomplete="off"/>
+        <button onclick="handleIntroStart()">Let's go 🚀</button>
+      </div>
+      <div class="intro-disclaimer">Educational purposes only — not financial advice.</div>
+    </div>
+  </div>
+</div>
+
+<main role="main" aria-live="polite">
+  <header class="app-header">
+    <div class="header-logo" style="flex-direction:column;gap:5px;">
+      <div style="display:flex;gap:7px;">
+        <div style="width:7px;height:7px;background:#00C48C;border-radius:50%;box-shadow:0 0 6px #00C48C;"></div>
+        <div style="width:7px;height:7px;background:#00C48C;border-radius:50%;box-shadow:0 0 6px #00C48C;"></div>
+      </div>
+      <div style="width:12px;height:5px;border-bottom:2px solid #00C48C;border-radius:0 0 20px 20px;"></div>
+    </div>
+    <div class="header-text"><h1>WRIN</h1><p>Financial Intelligence</p></div>
+    <div id="headerGreeting"></div>
+  </header>
+
+  <div id="reminder-tasks-container" style="width:100%;max-width:560px;padding:0 16px;margin-top:16px;"></div>
+
+  <!-- START CARD -->
+  <div class="page-section" id="startSection">
+    <div class="card">
+      <div class="welcome-emoji">👋</div>
+      <div class="card-title">Welcome, Scholar!</div>
+      <div class="card-sub">I'm WRIN the first ever AGENTIC AI FINANCE ASSISTANT. My goal is to help you understand credit scores. Please interact below to continue.</div>
+      <label class="input-label" for="nameInput">What's your name?</label>
+      <input type="text" id="nameInput" placeholder="Your name goes here... " autocomplete="off" style="margin-bottom:14px;"/>
+      <button class="btn btn-primary" id="startBtn"><span>Let's go!</span> <span>🚀</span></button>
+    </div>
+    <div id="response"></div>
+  </div>
+
+  <!-- MODE SELECTION — Finance + Feedback -->
+  <div id="modeUIContainer" class="page-section" style="display:none;">
+    <div class="card-title" style="margin-bottom:14px;font-family:'Space Grotesk',sans-serif;font-size:1.15rem;font-weight:700;">What do you want to explore?</div>
+    <div class="mode-grid">
+      <button class="mode-btn" data-value="budget" id="financeBtn">
+        <div class="mode-icon">💰</div>
+        <div class="mode-name">Finance</div>
+        <div class="mode-desc">Budgeting, investing & savings</div>
+      </button>
+      <button class="mode-btn" data-value="feedback">
+        <div class="mode-icon">💬</div>
+        <div class="mode-name">Feedback</div>
+        <div class="mode-desc">Share your thoughts on WRIN</div>
+      </button>
+    </div>
+
+    <!-- FINANCE CONCEPT WHEEL — appears when Finance is clicked -->
+    <div id="financeConceptPanel">
+      <div class="concept-wheel-label">Choose a topic</div>
+      <div class="concept-wheel">
+
+        <!-- Credit Score — LIVE -->
+        <div class="concept-node credit-node" id="creditNode" onclick="openCreditMode()">
+          <div class="concept-circle credit">💳</div>
+          <div class="concept-label">Credit Score</div>
+        </div>
+
+        <!-- Coming soon nodes — placeholder wheel spokes -->
+        <div class="concept-node coming-soon-node">
+          <div class="concept-circle coming-soon">📈</div>
+          <div class="concept-label" style="color:var(--muted);">Investing</div>
+          <div class="soon-badge">Soon</div>
+        </div>
+
+        <div class="concept-node coming-soon-node">
+          <div class="concept-circle coming-soon">🏦</div>
+          <div class="concept-label" style="color:var(--muted);">Saving</div>
+          <div class="soon-badge">Soon</div>
+        </div>
+
+        <div class="concept-node coming-soon-node">
+          <div class="concept-circle coming-soon">⚔️</div>
+          <div class="concept-label" style="color:var(--muted);">Debt</div>
+          <div class="soon-badge">Soon</div>
+        </div>
+
+        <div class="concept-node coming-soon-node">
+          <div class="concept-circle coming-soon">📋</div>
+          <div class="concept-label" style="color:var(--muted);">Taxes</div>
+          <div class="soon-badge">Soon</div>
+        </div>
+
+        <div class="concept-node coming-soon-node">
+          <div class="concept-circle coming-soon">🎯</div>
+          <div class="concept-label" style="color:var(--muted);">Retirement</div>
+          <div class="soon-badge">Soon</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- FEEDBACK -->
+  <div class="page-section">
+    <div id="feedback-section" class="card">
+      <div class="card-title">💬 How's WRIN doing?</div>
+      <div class="card-sub">Your feedback helps make this better for every student.</div>
+      <div class="feedback-btns">
+        <button class="feedback-thumb" id="feedback-yes" onclick="selectFeedback('yes', this)">👍 <span>Helpful!</span></button>
+        <button class="feedback-thumb" id="feedback-no" onclick="selectFeedback('no', this)">👎 <span>Not quite</span></button>
+      </div>
+      <label class="input-label" for="feedback-text">Any suggestions?</label>
+      <textarea id="feedback-text" placeholder="Would you use this to learn more about financial literacy?" rows="3" style="width:100%;margin-bottom:12px;"></textarea>
+      <button class="btn btn-primary" id="feedback-submit">Send Feedback 🎯</button>
+      <p id="feedback-response"></p>
+    </div>
+  </div>
+
+  <!-- Hidden legacy stuff -->
+  <div id="translationContainer" style="display:none;"><div id="translationOptions"></div></div>
+  <div id="userChatContainer" style="display:none;"></div>
+  <div id="modeSection" style="display:none;"></div>
+  <div id="queryInputGroup" style="display:none;"><input type="text" id="user-input"/></div>
+  <div id="tidyingInstructions" style="display:none;"><input type="text" id="tidyingTopic"/></div>
+  <div id="bookCategoryGroup" style="display:none;"><select id="bookCategory"></select></div>
+  <div id="bookTypeGroup" style="display:none;"></div>
+  <div id="modeTextInputGroup" style="display:none;"><input type="text" id="modeTextInput"/></div>
+  <div id="video-info" style="display:none;"></div>
+  <div id="modeInstructions" style="display:none;"></div>
+  <button id="sendBtn" style="display:none;"></button>
+  <div id="output"></div>
+  <div id="modeResponse" style="display:none;"></div>
+</main>
+
+<!-- CREDIT MODE CHAT — lives outside main, appended on open -->
+<div id="creditChatSection">
+  <div class="credit-chat-header">
+    <div class="credit-chat-icon">💳</div>
+    <div>
+      <div class="credit-chat-name">Credit Score Mode</div>
+      <div class="credit-chat-status">● WRIN Online</div>
+    </div>
+  </div>
+  <div class="credit-bubble-wrap">
+    <div id="creditChatContainer"></div>
+    <div class="credit-input-row">
+      <input type="text" id="creditInput" placeholder="Ask anything about credit scores..." autocomplete="off"/>
+      <button class="credit-send-btn" id="creditSendBtn">Send ↑</button>
+    </div>
+  </div>
+  <div class="credit-hint">Ask about your score, how you can build credit, or fixing damage</div>
+</div>
+
+<!-- BUDGET CHAT — legacy, stays for general finance -->
+<div id="chatSection" style="display:none;flex-direction:column;align-items:center;width:100%;margin-left:auto;margin-right:auto;">
+  <div class="chat-header">
+    <div class="chat-header-icon" style="flex-direction:column;gap:4px;">
+      <div style="display:flex;gap:6px;">
+        <div style="width:6px;height:6px;background:#fff;border-radius:50%;"></div>
+        <div style="width:6px;height:6px;background:#fff;border-radius:50%;"></div>
+      </div>
+      <div style="width:10px;height:4px;border-bottom:2px solid #fff;border-radius:0 0 20px 20px;"></div>
+    </div>
+    <div><div class="chat-header-name">WRIN</div><div class="chat-header-status">● Online</div></div>
+  </div>
+  <div class="chat-bubble-wrap" style="width:100%;">
+    <div id="budgetChatContainer"></div>
+    <div class="chat-input-row">
+      <input type="text" id="chatInput" placeholder="Ask me anything about money..." autocomplete="off"/>
+      <button class="chat-send-btn" id="chatSendBtn">Send ↑</button>
+    </div>
+  </div>
+  <div class="hint-pill" id="chatHint" style="display:none;">Type "options" to see a menu of topics</div>
+</div>
+
+<div id="budget-progress-container" style="width:100%;max-width:680px;margin-left:auto;margin-right:auto;padding:0 16px;margin-top:12px;"></div>
+
+<script>
+// ── INTRO PARTICLES ──────────────────────────────────────────────────────
+(function(){
+  const canvas=document.getElementById('introCanvas'),ctx=canvas.getContext('2d');
+  function resize(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
+  resize();window.addEventListener('resize',resize);
+  const particles=Array.from({length:80},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,vx:(Math.random()-0.5)*0.3,vy:-0.15-Math.random()*0.35,size:0.5+Math.random()*2,opacity:0.08+Math.random()*0.25,pulse:Math.random()*Math.PI*2}));
+  function draw(){ctx.clearRect(0,0,canvas.width,canvas.height);particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.pulse+=0.02;if(p.y<-5){p.y=canvas.height+5;p.x=Math.random()*canvas.width;}if(p.x<-5)p.x=canvas.width+5;if(p.x>canvas.width+5)p.x=-5;const a=p.opacity*(0.7+0.3*Math.sin(p.pulse));ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fillStyle=`rgba(0,196,140,${a})`;ctx.fill();});requestAnimationFrame(draw);}
+  draw();
+})();
+
+// ── INTRO STAT ROTATOR ───────────────────────────────────────────────────
+const introStats=[
+  {num:'57<span>%</span>',txt:"of Americans can't pass a basic financial literacy test.",src:'FINRA Foundation'},
+  {num:'$279<span>k</span>',txt:"lost in interest over the average American's lifetime.",src:'Federal Reserve'},
+  {num:'1 in <span>5</span>',txt:'high schoolers receives any financial education at all.',src:'Council for Economic Education'},
+];
+let introStatIdx=0,introStatTimer=null;
+function showIntroStat(i){const s=document.getElementById('statScreen');s.style.opacity='0';setTimeout(()=>{document.getElementById('statNum').innerHTML=introStats[i].num;document.getElementById('statTxt').textContent=introStats[i].txt;document.getElementById('statSrc').textContent=introStats[i].src;for(let j=0;j<3;j++)document.getElementById('sd'+j).classList.toggle('active',j===i);s.style.opacity='1';},300);}
+function nextIntroStat(){introStatIdx++;if(introStatIdx>=introStats.length){skipToFace();return;}showIntroStat(introStatIdx);introStatTimer=setTimeout(nextIntroStat,2800);}
+function skipToFace(){clearTimeout(introStatTimer);const s=document.getElementById('statScreen');s.style.opacity='0';setTimeout(()=>{s.style.display='none';document.getElementById('wrinFace').classList.add('visible');setTimeout(()=>{document.getElementById('nameArea').classList.add('visible');document.getElementById('introNameInput').focus();},500);},400);}
+introStatTimer=setTimeout(nextIntroStat,2800);
+document.getElementById('introNameInput').addEventListener('input',function(){const smile=document.getElementById('wrinSmile'),face=document.getElementById('wrinFace');if(this.value.trim().length>0){smile.classList.add('visible');setTimeout(()=>face.classList.add('tilted'),400);}else{smile.classList.remove('visible');face.classList.remove('tilted');}});
+document.getElementById('introNameInput').addEventListener('keydown',e=>{if(e.key==='Enter')handleIntroStart();});
+function handleIntroStart(){const name=document.getElementById('introNameInput').value.trim();if(!name){document.getElementById('introNameInput').style.borderColor='#EF4444';return;}const realInput=document.getElementById('nameInput');if(realInput){realInput.value=name;document.getElementById('startBtn')?.click();}}
+
+window.addEventListener('load',()=>{
+  const intro=document.getElementById('introScreen'),mainEl=document.querySelector('main');
+  window._revealMain=()=>{
+    intro.classList.add('fade-out');
+    const fallback=setTimeout(()=>{intro.style.display='none';mainEl.classList.add('visible');mainEl.appendChild(document.getElementById('chatSection'));mainEl.appendChild(document.getElementById('budget-progress-container'));},1400);
+    intro.addEventListener('transitionend',()=>{clearTimeout(fallback);intro.style.display='none';mainEl.classList.add('visible');mainEl.appendChild(document.getElementById('chatSection'));mainEl.appendChild(document.getElementById('budget-progress-container'));},{once:true});
+  };
+});
+
+// ── STATE ────────────────────────────────────────────────────────────────
+let currentUserId=localStorage.getItem('userId');
+let currentMode=null;
+let feedbackChoice=null;
+let lastGoalData=null;
+let confettiFired=false;
+let creditChatInitialized=false;
+
+const HIDDEN_COMMANDS=['1','2','3','4','5','6','7','8','9','10','budget','book','depression','tidy','translate','voice','logs','reminder','math','science'];
+
+// ── SESSION START ────────────────────────────────────────────────────────
+document.getElementById('startBtn').addEventListener('click',async()=>{
+  const name=document.getElementById('nameInput').value.trim();
+  if(!name){showResponseMsg('Please enter your name first!',false);return;}
+  const btn=document.getElementById('startBtn');
+  btn.disabled=true;btn.textContent='Starting...';
+  try{
+    const res=await fetch('/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+    const result=await res.json();
+    if(result.success){
+      currentUserId=result.userId;
+      localStorage.setItem('userId',currentUserId);
+      window.isNewUser=!result.returning;
+      document.getElementById('nameInput').disabled=true;
+      const greet=document.getElementById('headerGreeting');
+      greet.textContent=result.returning?`Welcome back, ${name}! 👋`:`Hi, ${name}! 👋`;
+      greet.style.display='block';
+      btn.textContent=result.returning?'✅ Welcome back!':'✅ Session active!';
+      document.getElementById('modeUIContainer').style.display='flex';
+      document.getElementById('modeUIContainer').style.flexDirection='column';
+      document.getElementById('modeUIContainer').style.alignItems='flex-start';
+      showResponseMsg(result.response,true);
+      if(window._revealMain)window._revealMain();
+      if(result.returning){
+        setTimeout(()=>{
+          document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
+          document.querySelector('.mode-btn[data-value="budget"]')?.classList.add('active');
+          currentMode='budget';
+          openFinancePanel();
+        },400);
+      }
+      document.getElementById('modeUIContainer').scrollIntoView({behavior:'smooth'});
+    }else{
+      showResponseMsg(result.error||'Something went wrong.',false);
+      btn.disabled=false;btn.textContent="Let's go! 🚀";
+    }
+  }catch{
+    showResponseMsg('Connection error. Please try again.',false);
+    btn.disabled=false;btn.textContent="Let's go! 🚀";
+  }
+});
+
+function showResponseMsg(text,success){
+  const el=document.getElementById('response');
+  el.style.display='block';
+  el.style.background=success?'var(--green-light)':'#FEF2F2';
+  el.style.borderColor=success?'var(--green-mid)':'#FCA5A5';
+  el.style.color=success?'#065F46':'#991B1B';
+  el.textContent=text;
+}
+
+// ── MODE BUTTONS ─────────────────────────────────────────────────────────
+document.querySelectorAll('.mode-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    currentMode=btn.dataset.value;
+    window.currentSelectedMode=currentMode;
+    updateModeUI(currentMode);
+  });
+});
+
+function updateModeUI(selected){
+  document.getElementById('feedback-section').style.display='none';
+  document.getElementById('chatSection').style.display='none';
+  document.getElementById('modeResponse').style.display='none';
+  document.getElementById('financeConceptPanel').style.display='none';
+  hideCreditChat();
+
+  const bp=document.getElementById('budget-progress-container');
+  if(selected!=='budget'&&bp){bp.classList.remove('expanded');bp.style.display='none';}
+
+  if(selected==='budget') openFinancePanel();
+  else if(selected==='feedback'){
+    document.getElementById('feedback-section').style.display='block';
+    document.getElementById('feedback-section').scrollIntoView({behavior:'smooth'});
+  }
+}
+
+// ── FINANCE CONCEPT PANEL ────────────────────────────────────────────────
+function openFinancePanel(){
+  const panel=document.getElementById('financeConceptPanel');
+  panel.style.display='block';
+  panel.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+// ── CREDIT MODE ──────────────────────────────────────────────────────────
+function openCreditMode(){
+  // Mark credit node active
+  document.querySelectorAll('.concept-node').forEach(n=>n.classList.remove('active'));
+  document.getElementById('creditNode').classList.add('active');
+
+  // Show credit chat section — inject into main after concept panel
+  const creditSection=document.getElementById('creditChatSection');
+  const mainEl=document.querySelector('main');
+
+  // Move it into main if not already there
+  if(!creditSection.parentNode||creditSection.parentNode!==mainEl){
+    mainEl.appendChild(creditSection);
+  }
+
+  creditSection.style.display='flex';
+  creditSection.style.flexDirection='column';
+  creditSection.style.width='100%';
+  creditSection.style.maxWidth='560px';
+  creditSection.style.margin='16px auto 0';
+  creditSection.style.padding='0 16px';
+
+  // Initialize if first time
+  if(!creditChatInitialized){
+    creditChatInitialized=true;
+    initCreditChat();
+  }
+
+  setTimeout(()=>creditSection.scrollIntoView({behavior:'smooth'}),100);
+}
+
+function closeCreditMode(){
+  hideCreditChat();
+  document.querySelectorAll('.concept-node').forEach(n=>n.classList.remove('active'));
+}
+
+function hideCreditChat(){
+  document.getElementById('creditChatSection').style.display='none';
+}
+
+async function initCreditChat(){
+  const container = document.getElementById('creditChatContainer');
+  const typing = appendCreditMsg(container, 'WRIN is thinking...💳', true);
+
+  try {
+    const res = await fetch('/credit_mode', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ userId: currentUserId, input: '' })
+    });
+
+    const data = await res.json();
+    console.log("FULL RESPONSE:", data);
+
+    if (typing?.parentNode) typing.parentNode.removeChild(typing);
+
+    if (data.success && data.result?.response) {
+      typewriterCredit(container, data.result.response);
+    } else {
+      console.error("Missing data.result.response", data);
+    }
+
+  } catch (err) {
+    if (typing?.parentNode) typing.parentNode.removeChild(typing);
+
+    // Debug for the console to  that anytime the function fails it sends a signal that allows me to trace it instantly.
+    console.error("initCreditChat failed:", err);
+  }
+}
+
+
+function renderScoreCapturedBadge(container, score) {
+  const tier = score >= 740 ? {color:'#00C48C', label:'Current Range: High credit',  bg:'#E6FAF5', border:'#B2EDD8'}
+             : score >= 670 ? {color:'#3B82F6', label:'Current Range: Stable credit',   bg:'#EFF6FF', border:'#BFDBFE'}
+             : score >= 580 ? {color:'#F59E0B', label:'Current Range: Weak credit',   bg:'#FFFBEB', border:'#FDE68A'}
+             :                {color:'#EF4444', label:'Current Range: Poor credit',   bg:'#FEF2F2', border:'#FCA5A5'};
+
+  // Remove existing pill if already there
+  const existing = document.getElementById('scorePill');
+  if (existing) existing.remove();
+
+  // Build the pill wrapper and display it on the screen fresh
+  const pill = document.createElement('div');
+  pill.id = 'scorePill';
+  pill.style.cssText = `
+    display:flex;align-items:center;gap:6px;
+    background:${tier.bg};
+    border:1.5px solid ${tier.border};
+    border-radius:20px;
+    padding:5px 12px;
+    margin-left:auto;
+    opacity:0;
+    transform:scale(0.85);
+    transition:opacity 0.4s ease, transform 0.4s ease;
+  `;
+
+  pill.innerHTML = `
+    <span style="font-size:0.72rem;font-weight:800;color:${tier.color};
+                 letter-spacing:0.04em;text-transform:uppercase;">${tier.label}</span>
+    <span id="scoreCounter" style="font-family:'Space Grotesk',sans-serif;
+                 font-size:1rem;font-weight:900;color:${tier.color};">0</span>
+  `;
+
+  // Inject into header
+  document.querySelector('.credit-chat-header').appendChild(pill);
+
+  // Animate in
+  requestAnimationFrame(() => {
+    pill.style.opacity = '1';
+    pill.style.transform = 'scale(1)';
+  });
+
+  // Count up
+  const counter = document.getElementById('scoreCounter');
+  const duration = 900;
+  const start = performance.now();
+
+  function tick(now) {
+    const progress = Math.min((now - start) / duration, 1);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    counter.textContent = Math.round(eased * score);
+    if (progress < 1) requestAnimationFrame(tick);
+    else counter.textContent = score;
+  }
+
+  requestAnimationFrame(tick);
+}
+
+
+
+
+
+function renderScoreProjectionChart(container, projectionData) {
+  const card = document.createElement('div');
+  card.style.cssText = 'margin:12px 0 12px 40px;background:var(--surface);border:1px solid var(--credit-mid);border-radius:14px;padding:16px;';
+  card.innerHTML = `<div style="font-family:'Space Grotesk',sans-serif;font-size:0.85rem;font-weight:700;color:var(--credit);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:12px;">📊 Score Projection</div>`;
+
+  const canvas = document.createElement('canvas');
+  canvas.style.cssText = 'width:100%;max-height:200px;';
+  card.appendChild(canvas);
+
+  const snapshots = document.createElement('div');
+  snapshots.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;';
+  projectionData.slice(1).forEach(point => {
+    snapshots.innerHTML += `
+      <div style="background:var(--credit-light);border:1px solid var(--credit-mid);border-radius:10px;padding:10px;text-align:center;">
+        <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;">${point.label}</div>
+        <div style="font-size:13px;font-weight:900;color:var(--credit);">${point.low}–${point.high}</div>
+      </div>`;
+  });
+  card.appendChild(snapshots);
+
+  const disclaimer = document.createElement('div');
+  disclaimer.style.cssText = 'font-size:0.7rem;color:var(--muted);font-weight:600;margin-top:10px;text-align:center;';
+  disclaimer.textContent = 'Note: This is the estimated range if you stay consistent, also know that individual results can vary. ';
+  card.appendChild(disclaimer);
+
+  container.appendChild(card);
+  container.scrollTop = container.scrollHeight;
+
+  const labels = projectionData.map(p => p.month === 0 ? 'Now' : `Month ${p.month}`);
+  const lowData = projectionData.map(p => p.low);
+  const highData = projectionData.map(p => p.high);
+
+  new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'High estimate',
+          data: highData,
+          borderColor: '#7C3AED',
+          backgroundColor: 'rgba(124,58,237,0.08)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 4,
+          borderWidth: 2
+        },
+        {
+          label: 'Low estimate',
+          data: lowData,
+          borderColor: '#C4B5FD',
+          backgroundColor: 'rgba(124,58,237,0.04)',
+          fill: false,
+          tension: 0.4,
+          pointRadius: 4,
+          borderWidth: 2,
+          borderDash: [4, 4]
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#64748B', font: { size: 10, family: 'Nunito', weight: '700' }}},
+        tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.raw}` }}
+      },
+      scales: {
+        y: {
+          min: Math.max(300, lowData[0] - 30),
+          max: Math.min(850, highData[highData.length - 1] + 30),
+          ticks: { color: '#94A3B8', font: { size: 10 }},
+          grid: { color: 'rgba(0,0,0,0.04)' }
+        },
+        x: { ticks: { color: '#94A3B8', font: { size: 10 }}, grid: { display: false }}
+      }
+    }
+  });
+}
+
+
+function renderProjectionPrompt(container) {
+  const wrap = document.createElement('div');
+  wrap.className = 'credit-wrin-msg';
+  wrap.style.marginTop = '8px';
+
+  const btn = document.createElement('button');
+  btn.style.cssText = `
+    margin-left: 40px;
+    padding: 10px 18px;
+    background: linear-gradient(135deg, #7C3AED, #6D28D9);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-family: 'Nunito', sans-serif;
+    font-weight: 800;
+    font-size: 0.85rem;
+    cursor: pointer;
+    box-shadow: 0 3px 10px rgba(124,58,237,0.3);
+    transition: all 0.2s;
+  `;
+  btn.textContent = '📊 Show my score projection';
+  btn.onclick = () => {
+    btn.remove();
+    const inputEl = document.getElementById('creditInput');
+    inputEl.value = 'show my projection';
+    handleCreditSend();
+  };
+
+  container.appendChild(btn);
+  container.scrollTop = container.scrollHeight;
+}
+
+
+
+
+
+// Credit send
+document.getElementById('creditSendBtn').addEventListener('click',handleCreditSend);
+document.getElementById('creditInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    handleCreditSend();
+  }
+});
+
+async function handleCreditSend(){
+  const inputEl=document.getElementById('creditInput');
+  const input=inputEl.value.trim();
+  if(!input)return;
+
+  const container=document.getElementById('creditChatContainer');
+  const sendBtn=document.getElementById('creditSendBtn');
+
+  appendCreditUserMsg(container,input);
+  inputEl.value='';
+  sendBtn.disabled=true;
+
+  const typing=appendCreditMsg(container,'WRIN is thinking...💳',true);
+
+  try{
+    const data=await fetch('/credit_mode',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({userId:currentUserId,input})
+    }).then(r=>r.json());
+
+    console.log("SERVER RESPONSE:", data); // DEBUG
+
+    if(typing?.parentNode)typing.parentNode.removeChild(typing);
+
+    if(data.success && data.result){
+      typewriterCredit(container, data.result.response).then(() => {
+
+        if(data.result.score_captured) {
+          renderScoreCapturedBadge(container, data.result.score_captured);
+      }
+
+
+        if(data.result.show_projection_chart && data.result.projection_data) {
+      renderScoreProjectionChart(container, data.result.projection_data);
+    }
+
+    // ── Projection prompt button ──────────────────────────────
+    if(data.result.show_projection_prompt) {
+      renderProjectionPrompt(container);
+    }
+  });
+
+
+      if(data.result.suggest_books && data.result.book){
+        setTimeout(()=>{
+          const nudge=document.createElement('div');
+          nudge.className='book-nudge';
+          nudge.innerHTML=`
+            <span class="book-nudge-icon">🎧</span>
+            <div class="book-nudge-text">
+              <strong>Recommended:</strong> ${data.result.book.title}
+            </div>
+            <span class="book-nudge-arrow">›</span>`;
+          nudge.onclick=()=>window.open(data.result.book.url,'_blank');
+          container.appendChild(nudge);
+          container.scrollTop=container.scrollHeight;
+        },600);
+      }
+    }
+
+  }catch(err){
+    if(typing?.parentNode)typing.parentNode.removeChild(typing);
+    appendCreditMsg(container,`❌ Connection error. Try again.`);
+  }finally{
+    sendBtn.disabled=false;
+    inputEl.focus();
+  }
+}
+
+
+// Credit chat helpers
+function appendCreditMsg(container,text,isTyping=false){
+  const wrap=document.createElement('div');
+  wrap.className='credit-wrin-msg';
+  const avatar=document.createElement('div');
+  avatar.className='credit-avatar';
+  avatar.textContent='💳';
+  const bubble=document.createElement('div');
+  bubble.className='credit-bubble'+(isTyping?' typing':'');
+  bubble.style.whitespace='pre-wrap';
+  bubble.innerHTML=text;
+  wrap.appendChild(avatar);wrap.appendChild(bubble);
+  container.appendChild(wrap);
+  container.scrollTop=container.scrollHeight;
+  return wrap;
+}
+
+function appendCreditUserMsg(container,text){
+  const wrap=document.createElement('div');
+  wrap.className='credit-user-wrap';
+  const bubble=document.createElement('div');
+  bubble.className='credit-user-bubble';
+  bubble.textContent=text;
+  wrap.appendChild(bubble);
+  container.appendChild(wrap);
+  container.scrollTop=container.scrollHeight;
+}
+
+function typewriterCredit(container,text){
+  return new Promise(resolve=>{
+    const wrap=document.createElement('div');
+    wrap.className='credit-wrin-msg';
+    const avatar=document.createElement('div');
+    avatar.className='credit-avatar';
+    avatar.textContent='💳';
+    const bubble=document.createElement('div');
+    bubble.className='credit-bubble';
+    bubble.style.whitespace='pre-wrap';
+    wrap.appendChild(avatar);wrap.appendChild(bubble);
+    container.appendChild(wrap);
+    container.scrollTop=container.scrollHeight;
+    let i=0;
+    const iv=setInterval(()=>{
+      if(i<text.length){bubble.innerHTML=linkify(text.substring(0,i+1));i++;container.scrollTop=container.scrollHeight;}
+      else{clearInterval(iv);resolve();}
+    },11);
+  });
+}
+
+// ── BUDGET CHAT (legacy general finance) ────────────────────────────────
+function openBudgetChat(){
+  const chatSection=document.getElementById('chatSection');
+  const container=document.getElementById('budgetChatContainer');
+  const hint=document.getElementById('chatHint');
+  if(!chatSection||!container){setTimeout(openBudgetChat,300);return;}
+  chatSection.style.display='flex';
+  hint.style.display='block';
+  requestAnimationFrame(()=>{
+    chatSection.classList.add('expanded');
+    const bp=document.getElementById('budget-progress-container');
+    if(bp)bp.classList.add('expanded');
+  });
+  if(container.children.length>0){if(lastGoalData)renderGoalProgress(lastGoalData);chatSection.scrollIntoView({behavior:'smooth'});return;}
+  const typing=appendWrinMsg(container,'...',true);
+  fetch('/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:currentUserId,mode:'budget',input:''})})
+  .then(r=>r.json())
+  .then(data=>{
+    if(typing?.parentNode)typing.parentNode.removeChild(typing);
+    if(data.simulation){renderWealthSimulation(container,data);return;}
+    if(window.isNewUser){
+      window.isNewUser=false;
+      appendWrinMsg(container,"Hey! 👋 I'm WRIN — your financial coach.\n\nLet's start by setting a savings goal. What are you working toward?");
+      setTimeout(()=>{renderBudgetResponse(container,data.response?.trim()?data.response:"So — what's your savings goal? Enter a dollar amount (e.g. $500):",data.suggest,data.menu);if(data.goal_progress)renderGoalProgress(data.goal_progress);},800);
+    }else if(data.goal_progress){
+      renderBudgetResponse(container,"Welcome back! 💪 Ask me anything, or type 'options' for the menu.",null,null);
+      renderGoalProgress(data.goal_progress);
+    }else if(data.response?.trim()){
+      renderBudgetResponse(container,data.response,data.suggest,data.menu);
+      if(data.goal_progress)renderGoalProgress(data.goal_progress);
+      else if(lastGoalData)renderGoalProgress(lastGoalData);
+    }else{
+      renderBudgetResponse(container,"What's your savings goal? Enter a dollar amount to get started (e.g. $500):",null,null);
+    }
+  })
+  .catch(()=>{if(typing?.parentNode)typing.parentNode.removeChild(typing);appendWrinMsg(container,"What's your savings goal? Enter a dollar amount to get started (e.g. $500):");});
+  chatSection.scrollIntoView({behavior:'smooth'});
+}
+
+document.getElementById('chatSendBtn').addEventListener('click',handleBudgetSend);
+document.getElementById('chatInput').addEventListener('keydown',e=>{if(e.key==='Enter')handleBudgetSend();});
+
+async function handleBudgetSend(){
+  const inputEl=document.getElementById('chatInput');
+  const input=inputEl.value.trim();
+  if(!input)return;
+  const container=document.getElementById('budgetChatContainer');
+  const sendBtnEl=document.getElementById('chatSendBtn');
+  if(!HIDDEN_COMMANDS.includes(input.toLowerCase()))appendUserMsg(container,input);
+  inputEl.value='';sendBtnEl.disabled=true;
+  const typing=appendWrinMsg(container,'WRIN is thinking...',true);
+  try{
+    const data=await postMode({userId:currentUserId,mode:'budget',input});
+    const liveC=document.getElementById('budgetChatContainer');
+    if(typing?.parentNode)typing.parentNode.removeChild(typing);
+    if(!data||data.success===false){if(liveC)appendWrinMsg(liveC,data?.error||'Something went wrong.');}
+    else if(data.simulation){if(liveC)renderWealthSimulation(liveC,data);}
+    else if(data.loan_simulation){if(liveC)renderLoanSimulation(liveC,data);}
+    else if(data.response){if(liveC)renderBudgetResponse(liveC,data.response,data.suggest,data.menu);}
+    if(data?.reset){lastGoalData=null;confettiFired=false;const bp=document.getElementById('budget-progress-container');if(bp){const fill=bp.querySelector('.progress-fill');if(fill)fill.style.width='0%';setTimeout(()=>{bp.innerHTML='';bp.style.display='none';},600);}}
+    else if(data?.goal_reached){if(data.goal_progress)renderGoalProgress(data.goal_progress);if(!confettiFired){confettiFired=true;setTimeout(launchConfetti,400);}setTimeout(()=>{lastGoalData=null;confettiFired=false;const bp=document.getElementById('budget-progress-container');if(bp){const fill=bp.querySelector('.progress-fill');if(fill)fill.style.width='0%';setTimeout(()=>{bp.innerHTML='';bp.style.display='none';},600);}},1200);const chatInput=document.getElementById('chatInput');chatInput.placeholder="Type your next goal (e.g. $2000)...";chatInput.focus();setTimeout(()=>{chatInput.placeholder="Ask me anything about money...";},8000);}
+    else if(data?.goal_progress){renderGoalProgress(data.goal_progress);}
+    else if(lastGoalData){renderGoalProgress(lastGoalData);}
+  }catch(err){
+    const liveC=document.getElementById('budgetChatContainer');
+    if(typing?.parentNode)typing.parentNode.removeChild(typing);
+    if(liveC)appendWrinMsg(liveC,`❌ ${err.message}`);
+  }finally{sendBtnEl.disabled=false;inputEl.focus();}
+}
+
+function appendUserMsg(container,text){const wrap=document.createElement('div');wrap.className='user-msg-wrap';const bubble=document.createElement('div');bubble.className='user-bubble';bubble.textContent=text;wrap.appendChild(bubble);container.appendChild(wrap);container.scrollTop=container.scrollHeight;}
+function appendWrinMsg(container,text,isTyping=false){const wrap=document.createElement('div');wrap.className='wrin-msg';const avatar=document.createElement('div');avatar.className='wrin-avatar';avatar.style.cssText='display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;';avatar.innerHTML=`<div style="display:flex;gap:5px;"><div style="width:5px;height:5px;background:#fff;border-radius:50%;"></div><div style="width:5px;height:5px;background:#fff;border-radius:50%;"></div></div><div style="width:9px;height:4px;border-bottom:2px solid #fff;border-radius:0 0 10px 10px;"></div>`;const bubble=document.createElement('div');bubble.className='wrin-bubble'+(isTyping?' typing':'');bubble.innerHTML=linkify(text);wrap.appendChild(avatar);wrap.appendChild(bubble);container.appendChild(wrap);container.scrollTop=container.scrollHeight;return wrap;}
+
+function renderBudgetResponse(container,text,suggest,menu){
+  if(menu&&menu.length){
+    const bubble=document.createElement('div');bubble.style.cssText='width:100%;margin-bottom:10px;';
+    if(text){const hdr=document.createElement('div');hdr.className='wrin-msg';const av=document.createElement('div');av.className='wrin-avatar';av.style.cssText='display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;';av.innerHTML=`<div style="display:flex;gap:5px;"><div style="width:5px;height:5px;background:#fff;border-radius:50%;"></div><div style="width:5px;height:5px;background:#fff;border-radius:50%;"></div></div><div style="width:9px;height:4px;border-bottom:2px solid #fff;border-radius:0 0 10px 10px;"></div>`;const bbl=document.createElement('div');bbl.className='wrin-bubble';bbl.textContent=text;hdr.appendChild(av);hdr.appendChild(bbl);bubble.appendChild(hdr);}
+    const menuList=document.createElement('div');menuList.className='menu-list';menuList.style.marginLeft='40px';
+    menu.forEach(item=>{const btn=document.createElement('button');btn.className='menu-item';const emojiMatch=item.label.match(/^(\p{Emoji_Presentation}|\p{Emoji}\uFE0F|[\u{1F300}-\u{1FFFF}]|\S{1,2})\s*(.*)/u);const icon=emojiMatch?emojiMatch[1]:'→';const labelText=emojiMatch?emojiMatch[2]:item.label;btn.innerHTML=`<span class="menu-item-icon">${icon}</span><div style="display:flex;flex-direction:column;align-items:flex-start;"><span class="menu-item-text">${labelText}</span></div><span style="margin-left:auto;color:var(--muted);font-size:1rem;">›</span>`;btn.onclick=()=>{const chatInput=document.getElementById('chatInput');chatInput.value='';chatInput.value=item.action;handleBudgetSend();};menuList.appendChild(btn);});
+    bubble.appendChild(menuList);container.appendChild(bubble);container.scrollTop=container.scrollHeight;
+  }else{
+    typewriterWrin(container,text).then(()=>{
+      if(suggest){const nudgeWrap=document.createElement('div');nudgeWrap.style.cssText='margin-left:40px;margin-top:8px;';const nudgeBtn=document.createElement('button');nudgeBtn.className='btn btn-outline';nudgeBtn.style.cssText='max-width:280px;font-size:0.85rem;padding:10px;';nudgeBtn.textContent=suggest.label;nudgeBtn.onclick=()=>{const chatInput=document.getElementById('chatInput');chatInput.value='';chatInput.value=suggest.action;handleBudgetSend();};nudgeWrap.appendChild(nudgeBtn);container.appendChild(nudgeWrap);}
+      container.scrollTop=container.scrollHeight;
+    });
+  }
+}
+
+function typewriterWrin(container,text){
+  return new Promise(resolve=>{
+    const wrap=document.createElement('div');wrap.className='wrin-msg';
+    const avatar=document.createElement('div');avatar.className='wrin-avatar';avatar.style.cssText='display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;';avatar.innerHTML=`<div style="display:flex;gap:5px;"><div style="width:5px;height:5px;background:#fff;border-radius:50%;"></div><div style="width:5px;height:5px;background:#fff;border-radius:50%;"></div></div><div style="width:9px;height:4px;border-bottom:2px solid #fff;border-radius:0 0 10px 10px;"></div>`;
+    const bubble=document.createElement('div');bubble.className='wrin-bubble';
+    wrap.appendChild(avatar);wrap.appendChild(bubble);container.appendChild(wrap);container.scrollTop=container.scrollHeight;
+    const lines=text.split('\n');const embedLines=[];const linkLines=[];const ytCount=lines.filter(l=>l.match(/https?:\/\/.*youtu/)).length;const isAudiobookList=ytCount>1;const textLines=[];
+    for(let li=0;li<lines.length;li++){const line=lines[li];const m=line.match(/(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11}[^\s]*))/);if(m){let title='';if(textLines.length>0){const prevLine=textLines[textLines.length-1];if(!prevLine.match(/https?:\/\//)){title=prevLine.replace(/^[\s•\-]+/,'').trim();textLines.pop();}}if(isAudiobookList)linkLines.push({url:m[1],title});else embedLines.push({url:m[1],title});}else{textLines.push(line);}}
+    const clean=textLines.join('\n');let i=0;
+    const interval=setInterval(()=>{if(i<clean.length){bubble.innerHTML=linkify(clean.substring(0,i+1));i++;container.scrollTop=container.scrollHeight;}else{clearInterval(interval);const liveC=document.getElementById('budgetChatContainer')||container;embedLines.forEach(({url,title})=>renderYoutubeEmbed(liveC,url,title));if(linkLines.length>0)linkLines.forEach(({url,title})=>renderYoutubeEmbed(liveC,url,title));setTimeout(()=>{liveC.scrollTop=liveC.scrollHeight;},300);resolve();}},12);
+  });
+}
+
+// ── CONFETTI ─────────────────────────────────────────────────────────────
+function launchConfetti(){const canvas=document.createElement('canvas');canvas.style.cssText='position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:99999;';document.body.appendChild(canvas);const ctx=canvas.getContext('2d');canvas.width=window.innerWidth;canvas.height=window.innerHeight;const colors=['#00C48C','#3B82F6','#F59E0B','#EF4444','#8B5CF6','#EC4899','#ffffff'];const pieces=Array.from({length:160},()=>({x:Math.random()*canvas.width,y:-20-Math.random()*100,w:8+Math.random()*10,h:4+Math.random()*6,color:colors[Math.floor(Math.random()*colors.length)],rot:Math.random()*Math.PI*2,vx:(Math.random()-0.5)*4,vy:2+Math.random()*4,vrot:(Math.random()-0.5)*0.2,opacity:1}));let frame=0;function draw(){ctx.clearRect(0,0,canvas.width,canvas.height);pieces.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.rot+=p.vrot;p.vy+=0.08;if(frame>120)p.opacity-=0.012;ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot);ctx.globalAlpha=Math.max(0,p.opacity);ctx.fillStyle=p.color;ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);ctx.restore();});frame++;if(frame<220)requestAnimationFrame(draw);else canvas.remove();}draw();}
+
+// ── PROGRESS ─────────────────────────────────────────────────────────────
+function renderGoalProgress(progressData){const bp=document.getElementById('budget-progress-container');if(!bp||!progressData)return;lastGoalData=progressData;const percent=Math.min(Math.round(progressData.progress),100);const isComplete=percent>=100;bp.innerHTML=`<div class="progress-card"><div class="progress-label"><span style="color:var(--text);">💰 Savings Goal${isComplete?' — <span style="color:var(--green);">REACHED! 🎉</span>':''}</span><span>$${Number(progressData.current).toLocaleString()} / $${Number(progressData.goal).toLocaleString()}</span></div><div class="progress-bar"><div class="progress-fill" style="width:0%">${percent}%</div></div><div style="font-size:11px;color:var(--muted);margin-top:6px;font-weight:700;">${isComplete?'🏆 You hit your goal! Keep building wealth.':`$${Math.max(0,Number(progressData.goal)-Number(progressData.current)).toLocaleString()} left to reach your goal`}</div></div>`;bp.style.display='block';setTimeout(()=>{const fill=bp.querySelector('.progress-fill');if(fill)fill.style.width=percent+'%';if(isComplete&&!confettiFired){confettiFired=true;setTimeout(launchConfetti,900);}},50);}
+
+// ── WEALTH SIMULATION ────────────────────────────────────────────────────
+function renderWealthSimulation(container,data){const sim=data.simulation;const sp=data.sp500;const wrapper=document.createElement('div');wrapper.style.cssText='width:100%;padding:4px 0;';if(sp){const isPos=!sp.change.includes('-');const spDiv=document.createElement('div');spDiv.className='sp-card';spDiv.innerHTML=`<div style="font-size:11px;font-weight:800;color:var(--blue);letter-spacing:0.06em;text-transform:uppercase;margin-bottom:8px;">S&P 500 (SPY) — Live Market Data</div><div style="font-size:12px;color:var(--muted);font-weight:600;margin-bottom:12px;line-height:1.6;padding:10px;background:#fff;border-radius:10px;border:1px solid #BFDBFE;">💡 The S&P 500 tracks 500 of the biggest US companies. When you invest in an index fund, <strong style="color:var(--blue)">this is what you own a slice of.</strong></div><div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;"><div><div style="font-size:11px;color:var(--muted);font-weight:700;">Current Price</div><div style="font-size:28px;font-weight:900;color:var(--blue);">$${parseFloat(sp.price).toFixed(2)}</div></div><div style="margin-left:auto;text-align:right;"><div style="color:${isPos?'var(--green)':'#EF4444'};font-weight:800;font-size:14px;">${isPos?'📈':'📉'} ${sp.change} (${sp.change_pct})</div></div></div>`;wrapper.appendChild(spDiv);}
+const explain=document.createElement('div');explain.style.cssText='background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:10px;font-size:13px;font-weight:600;line-height:1.7;color:var(--text);';explain.innerHTML=`<div style="font-weight:900;margin-bottom:8px;font-size:14px;">What does this mean? 🤔</div>Monthly: <strong>$${sim.monthly}</strong> for <strong>${sim.years} years</strong>, starting: <strong>$${sim.starting}</strong>.<br><div style="background:var(--green-light);border:1px solid var(--green-mid);padding:10px;border-radius:8px;margin-top:8px;text-align:center;">Invest <strong>$${sim.conservative.invested_total.toLocaleString()}</strong> → could become <strong style="color:var(--green);font-size:15px;">$${sim.moderate.future_value.toLocaleString()}</strong></div>`;wrapper.appendChild(explain);
+renderWealthChart(wrapper,sim);const liveC=container||document.getElementById('budgetChatContainer');if(liveC){liveC.appendChild(wrapper);liveC.scrollTop=liveC.scrollHeight;}}
+
+function renderWealthChart(wrapper,sim){
+  const cw=document.createElement('div');cw.className='chart-card';cw.innerHTML=`<div class="chart-title">Wealth Growth Projection 📊</div>`;
+  const canvas=document.createElement('canvas');canvas.style.cssText='width:100%;max-height:220px;';cw.appendChild(canvas);
+  const sliderSection=document.createElement('div');sliderSection.style.cssText='margin-top:16px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:12px;';
+  sliderSection.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">🎚️ Adjust Monthly</span><span id="sliderMonthlyLabel" style="font-size:14px;font-weight:900;color:var(--green);">$${sim.monthly}/mo</span></div><input type="range" id="monthlySlider" min="10" max="${Math.max(sim.monthly*5,2000)}" step="10" value="${sim.monthly}" style="width:100%;accent-color:var(--green);height:6px;cursor:pointer;"/><div style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;" id="snapshotCards"></div><div style="margin-top:12px;padding:10px 14px;background:linear-gradient(135deg,var(--green-light),#EFF6FF);border:1px solid var(--green-mid);border-radius:10px;font-size:12px;font-weight:700;color:var(--text);line-height:1.7;" id="insightText"></div>`;
+  cw.appendChild(sliderSection);wrapper.appendChild(cw);
+  function buildData(monthly){const labels=[],consData=[],modData=[],aggData=[],invData=[];for(let y=0;y<=sim.years;y++){labels.push(`Yr ${y}`);consData.push(simulateWealth(sim.starting,monthly,0.06,y));modData.push(simulateWealth(sim.starting,monthly,0.09,y));aggData.push(simulateWealth(sim.starting,monthly,0.12,y));invData.push((monthly*y*12)+sim.starting);}return{labels,consData,modData,aggData,invData};}
+  const snapshotEl=sliderSection.querySelector('#snapshotCards'),insightEl=sliderSection.querySelector('#insightText'),labelEl=sliderSection.querySelector('#sliderMonthlyLabel'),sliderEl=sliderSection.querySelector('#monthlySlider');
+  function updateCards(monthly){const mid=Math.round(sim.years/2);const atMid=simulateWealth(sim.starting,monthly,0.10,mid);const atEnd=simulateWealth(sim.starting,monthly,0.10,sim.years);const atPlus=simulateWealth(sim.starting,monthly,0.10,sim.years+5);if(snapshotEl)snapshotEl.innerHTML=`<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center;"><div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;">In ${mid} yrs</div><div style="font-size:15px;font-weight:900;color:var(--amber);">$${atMid.toLocaleString()}</div></div><div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center;"><div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;">In ${sim.years} yrs</div><div style="font-size:15px;font-weight:900;color:var(--blue);">$${atEnd.toLocaleString()}</div></div><div style="background:#fff;border:1px solid var(--green-mid);border-radius:10px;padding:10px;text-align:center;"><div style="font-size:10px;font-weight:800;color:var(--green);text-transform:uppercase;">+5 yrs more</div><div style="font-size:15px;font-weight:900;color:var(--green);">$${atPlus.toLocaleString()}</div></div>`;const invested=monthly*sim.years*12+sim.starting;const growth=atEnd-invested;if(insightEl)insightEl.innerHTML=`💡 At <strong>$${monthly}/month</strong> — you put in <strong>$${invested.toLocaleString()}</strong> and compound interest adds <strong style="color:var(--green);">$${growth.toLocaleString()}</strong> on top.`;}
+  const d=buildData(sim.monthly);const chart=new Chart(canvas,{type:'line',data:{labels:d.labels,datasets:[{label:'Just Cash',data:d.invData,borderColor:'rgba(100,116,139,0.4)',borderDash:[5,5],fill:true,backgroundColor:'rgba(100,116,139,0.04)',tension:0.4,pointRadius:0},{label:'6% Conservative',data:d.consData,borderColor:'#F59E0B',fill:false,tension:0.4,pointRadius:0},{label:'9% Moderate',data:d.modData,borderColor:'#3B82F6',fill:false,tension:0.4,pointRadius:0,borderWidth:2},{label:'12% S&P Recent',data:d.aggData,borderColor:'#00C48C',fill:false,tension:0.4,pointRadius:0,borderWidth:3}]},options:{responsive:true,interaction:{mode:'index',intersect:false},animation:{duration:300},plugins:{legend:{position:'bottom',labels:{color:'#64748B',font:{size:10,family:'Nunito',weight:'700'}}},tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: $${Math.round(ctx.raw).toLocaleString()}`}}},scales:{y:{ticks:{callback:val=>`$${(val/1000).toFixed(0)}k`,color:'#94A3B8',font:{size:10}},grid:{color:'rgba(0,0,0,0.04)'}},x:{ticks:{color:'#94A3B8',font:{size:10}},grid:{display:false}}}}});
+  updateCards(sim.monthly);if(sliderEl)sliderEl.addEventListener('input',function(){const monthly=parseInt(this.value);if(labelEl)labelEl.textContent=`$${monthly}/mo`;const nd=buildData(monthly);chart.data.datasets[0].data=nd.invData;chart.data.datasets[1].data=nd.consData;chart.data.datasets[2].data=nd.modData;chart.data.datasets[3].data=nd.aggData;chart.update();updateCards(monthly);});
+}
+
+function simulateWealth(starting,monthly,rate,years){const r=rate/12;let total=starting;for(let i=0;i<years*12;i++)total=total*(1+r)+monthly;return Math.round(total);}
+
+// ── LOAN SIMULATION ──────────────────────────────────────────────────────
+function renderLoanSimulation(container,data){const loan=data.loan_simulation;const wrapper=document.createElement('div');wrapper.style.cssText='width:100%;padding:4px 0;';const header=document.createElement('div');header.style.cssText='background:linear-gradient(135deg,#FEF2F2,#FFF7ED);border:1.5px solid #FCA5A5;border-radius:14px;padding:16px;margin-bottom:10px;';header.innerHTML=`<div style="font-size:11px;font-weight:800;color:#EF4444;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:8px;">💸 Loan — What It Actually Costs</div><div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;"><div style="flex:1;min-width:100px;background:#fff;border:1px solid #FCA5A5;border-radius:10px;padding:10px;text-align:center;"><div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;">Loan Amount</div><div style="font-size:20px;font-weight:900;color:var(--text);">$${loan.principal.toLocaleString()}</div></div><div style="flex:1;min-width:100px;background:#fff;border:1px solid #FCA5A5;border-radius:10px;padding:10px;text-align:center;"><div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;">Monthly Payment</div><div style="font-size:20px;font-weight:900;color:#EF4444;">$${loan.base.monthly_payment.toLocaleString()}</div></div><div style="flex:1;min-width:100px;background:#fff;border:1px solid #FCA5A5;border-radius:10px;padding:10px;text-align:center;"><div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;">Interest Lost</div><div style="font-size:20px;font-weight:900;color:#EF4444;">$${loan.base.total_interest.toLocaleString()}</div></div></div>`;wrapper.appendChild(header);const liveC=container||document.getElementById('budgetChatContainer');if(liveC){liveC.appendChild(wrapper);liveC.scrollTop=liveC.scrollHeight;}}
+
+// ── FEEDBACK ─────────────────────────────────────────────────────────────
+function selectFeedback(choice,btn){feedbackChoice=choice;document.querySelectorAll('.feedback-thumb').forEach(b=>b.classList.remove('selected-yes','selected-no'));btn.classList.add(choice==='yes'?'selected-yes':'selected-no');}
+document.getElementById('feedback-submit').addEventListener('click',()=>{const text=document.getElementById('feedback-text').value.trim();const respEl=document.getElementById('feedback-response');if(!text){respEl.style.color='#EF4444';respEl.textContent="Please write something first!";return;}fetch('/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({feedback:text})}).then(r=>r.json()).then(d=>{respEl.style.color=d.success?'var(--green)':'#EF4444';respEl.textContent=d.success?'✅ Thanks for the feedback!':'❌ '+(d.message||'Error');if(d.success)document.getElementById('feedback-text').value='';}).catch(()=>{respEl.style.color='#EF4444';respEl.textContent='❌ Network error.';});});
+
+// ── VIDEO EMBEDS ─────────────────────────────────────────────────────────
+const tag=document.createElement('script');tag.src="https://www.youtube.com/iframe_api";document.head.appendChild(tag);
+const ytPlayers={};let currentTimestamp=0;
+function onYouTubeIframeAPIReady(){console.log('[YT] ready');}
+function renderYoutubeEmbed(container,url,title){
+  const match=url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  if(!match)return false;const videoId=match[1];
+  const wrapper=document.createElement('div');wrapper.className='video-wrapper';
+  const bar=document.createElement('div');bar.className='video-title-bar';bar.textContent=`▶ ${title||'WRIN Resource'}`;
+  const iframe=document.createElement('iframe');iframe.setAttribute('width','100%');iframe.setAttribute('height','200');iframe.setAttribute('frameborder','0');iframe.style.cssText='width:100% !important;height:200px !important;min-height:200px;border:none;display:block;';iframe.src=`https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1`;iframe.allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';iframe.allowFullscreen=true;
+  const qaSection=document.createElement('div');qaSection.className='video-qa-section';
+  const qaDisplay=document.createElement('div');qaDisplay.className='video-qa-display';qaDisplay.textContent='Ask WRIN anything about this video';
+  const qaRow=document.createElement('div');qaRow.className='video-qa-row';
+  const qaInput=document.createElement('input');qaInput.className='video-qa-input';qaInput.placeholder='Ask about this video...';
+  const qaBtn=document.createElement('button');qaBtn.className='video-qa-btn';qaBtn.textContent='Ask';
+  async function askVideoQuestion(){const question=qaInput.value.trim();if(!question)return;qaInput.value='';qaDisplay.textContent='WRIN is thinking...';qaBtn.disabled=true;try{const res=await fetch('/video_qa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:currentUserId,question,videoId,timestamp:0,topic:title||''})});const data=await res.json();if(data.success){qaDisplay.textContent='';let i=0;const txt=data.response;const iv=setInterval(()=>{if(i<txt.length){qaDisplay.textContent=txt.substring(0,i+1);i++;}else clearInterval(iv);},10);}else{qaDisplay.textContent=`⚠️ ${data.error||'Could not get response.'}`;}}catch(err){qaDisplay.textContent=`❌ ${err.message}`;}finally{qaBtn.disabled=false;}}
+  qaBtn.onclick=askVideoQuestion;qaInput.addEventListener('keydown',e=>{if(e.key==='Enter')askVideoQuestion();});
+  qaRow.appendChild(qaInput);qaRow.appendChild(qaBtn);qaSection.appendChild(qaDisplay);qaSection.appendChild(qaRow);
+  wrapper.appendChild(bar);wrapper.appendChild(iframe);wrapper.appendChild(qaSection);
+  container.appendChild(wrapper);return true;
+}
+
+// ── HELPERS ──────────────────────────────────────────────────────────────
+function linkify(text){return text.replace(/(https?:\/\/(?!(?:www\.)?youtu(?:be\.com|\.be))[^\s]+)/g,url=>`<a href="${url}" target="_blank" style="color:var(--blue);font-weight:700;">${url}</a>`);}
+async function postMode(payload){const res=await fetch('/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});if(!res.ok)throw new Error(`HTTP ${res.status}`);return res.json();}
+document.addEventListener('keydown',e=>{if(e.key==='Enter'){const sb=document.getElementById('startBtn');if(sb&&!sb.disabled&&document.getElementById('nameInput')===document.activeElement)sb.click();}});
+window.currentSelectedMode=null;
+document.addEventListener('DOMContentLoaded',async()=>{const uid=localStorage.getItem('userId');if(uid){try{await fetch('/create_session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:uid})});}catch{}}});
+</script>
+</body>
+</html>
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Click here to  interact with WRIn the financial intelligence system initial-viewport">
+
+<title> WRINtelligence </title>
+
+
+<body>
+<h1> Not sure what to ask, some common topics include </h1>
+<section class="credit-faq-section">
+
+  <h2>CREDIT BUILDING</h2>
+  <ul>
+    <li>How do I build credit? &rarr; <span>Credit Building Plan</span></li>
+    <li>How can I improve my credit score? &rarr; <span>Credit Building Plan</span></li>
+    <li>What's the fastest way to raise my score? &rarr; <span>Credit Building Plan</span></li>
+    <li>I have no credit history. What should I do? &rarr; <span>Beginner Credit Plan</span></li>
+  </ul>
+
+  <h2>CREDIT CARDS</h2>
+  <ul>
+    <li>What credit card should I get? &rarr; <span>Credit Card Recommendations</span></li>
+    <li>What's the best card for my score? &rarr; <span>Credit Card Recommendations</span></li>
+    <li>Should I get a secured card? &rarr; <span>Secured Card Guidance</span></li>
+    <li>Should I get a student credit card? &rarr; <span>Student Card Recommendations</span></li>
+  </ul>
+
+  <h2>CREDIT SCORE EXPLANATION</h2>
+  <ul>
+    <li>What is a credit score? &rarr; <span>Credit Score Education</span></li>
+    <li>How is my score calculated? &rarr; <span>Score Factors Breakdown</span></li>
+    <li>What affects my score the most? &rarr; <span>Score Factors Breakdown</span></li>
+    <li>Why is my score low? &rarr; <span>Credit Analysis</span></li>
+  </ul>
+
+  <h2>SCORE IMPROVEMENT</h2>
+  <ul>
+    <li>Why did my score drop? &rarr; <span>Score Change Analysis</span></li>
+    <li>How can I raise my score by 50 points? &rarr; <span>Score Improvement Plan</span></li>
+    <li>What's hurting my score? &rarr; <span>Credit Analysis</span></li>
+    <li>What should I focus on first? &rarr; <span>Priority Action Plan</span></li>
+  </ul>
+
+  <h2>UTILIZATION</h2>
+  <ul>
+    <li>How much of my credit limit should I use? &rarr; <span>Utilization Education</span></li>
+    <li>Is 30% utilization bad? &rarr; <span>Utilization Analysis</span></li>
+    <li>Should I keep a balance on my card? &rarr; <span>Utilization Education</span></li>
+    <li>How does utilization affect my score? &rarr; <span>Utilization Education</span></li>
+  </ul>
+
+  <h2>PAYMENTS</h2>
+  <ul>
+    <li>What happens if I miss a payment? &rarr; <span>Payment Impact Analysis</span></li>
+    <li>Can one late payment hurt my score? &rarr; <span>Payment Impact Analysis</span></li>
+    <li>Should I pay my balance in full? &rarr; <span>Payment Guidance</span></li>
+    <li>When should I pay my credit card bill? &rarr; <span>Payment Timing Guide</span></li>
+  </ul>
+
+  <h2>HARD INQUIRIES</h2>
+  <ul>
+    <li>Will applying for a card hurt my score? &rarr; <span>Hard Inquiry Education</span></li>
+    <li>What is a hard inquiry? &rarr; <span>Hard Inquiry Education</span></li>
+    <li>How many inquiries are too many? &rarr; <span>Inquiry Risk Analysis</span></li>
+    <li>Should I apply for another card? &rarr; <span>Application Decision Guide</span></li>
+  </ul>
+
+  <h2>CREDIT REPORTS</h2>
+  <ul>
+    <li>How do I check my credit report? &rarr; <span>Credit Report Guide</span></li>
+    <li>What's on my credit report? &rarr; <span>Credit Report Education</span></li>
+    <li>How often should I review my report? &rarr; <span>Credit Monitoring Guide</span></li>
+    <li>How do I dispute an error? &rarr; <span>Dispute Process Guide</span></li>
+  </ul>
+
+  <h2>COLLECTIONS</h2>
+  <ul>
+    <li>I have collections. What should I do? &rarr; <span>Collections Recovery Plan</span></li>
+    <li>Can collections be removed? &rarr; <span>Collections Education</span></li>
+    <li>How long do collections stay on my report? &rarr; <span>Collections Timeline</span></li>
+    <li>Should I pay off collections? &rarr; <span>Collections Strategy Guide</span></li>
+  </ul>
+
+  <h2>DEBT MANAGEMENT</h2>
+  <ul>
+    <li>How do I pay off debt faster? &rarr; <span>Debt Payoff Plan</span></li>
+    <li>What's the best debt payoff strategy? &rarr; <span>Debt Strategy Comparison</span></li>
+    <li>Should I focus on credit cards first? &rarr; <span>Debt Prioritization Guide</span></li>
+    <li>How much debt is too much? &rarr; <span>Debt Health Analysis</span></li>
+  </ul>
+
+  <h2>IDENTITY THEFT &amp; SECURITY</h2>
+  <ul>
+    <li>How do I freeze my credit? &rarr; <span>Credit Freeze Guide</span></li>
+    <li>What should I do if someone opened an account in my name? &rarr; <span>Identity Theft Recovery Plan</span></li>
+    <li>How do I protect my credit? &rarr; <span>Credit Security Guide</span></li>
+    <li>How do fraud alerts work? &rarr; <span>Fraud Alert Education</span></li>
+  </ul>
+
+  <h2>AUTO LOANS</h2>
+  <ul>
+    <li>Can I get approved for a car loan? &rarr; <span>Auto Loan Analysis</span></li>
+    <li>What score do I need for a car loan? &rarr; <span>Auto Loan Requirements</span></li>
+    <li>Should I finance a vehicle? &rarr; <span>Vehicle Financing Guide</span></li>
+    <li>How does a car loan affect my credit? &rarr; <span>Auto Loan Education</span></li>
+  </ul>
+
+  <h2>MORTGAGES</h2>
+  <ul>
+    <li>What score do I need for a mortgage? &rarr; <span>Mortgage Readiness Analysis</span></li>
+    <li>Can I buy a house with my score? &rarr; <span>Home Buying Readiness</span></li>
+    <li>How do I prepare for a mortgage? &rarr; <span>Mortgage Preparation Plan</span></li>
+    <li>What affects mortgage approval? &rarr; <span>Mortgage Factors Breakdown</span></li>
+  </ul>
+
+  <h2>PERSONALIZED PLANS</h2>
+  <ul>
+    <li>Create a plan for my credit situation. &rarr; <span>Personalized Action Plan</span></li>
+    <li>Based on my score, what should I do next? &rarr; <span>Personalized Action Plan</span></li>
+    <li>Give me next steps. &rarr; <span>Personalized Action Plan</span></li>
+    <li>Help me reach a 700+ score. &rarr; <span>Goal-Based Credit Plan</span></li>
+  </ul>
+
+  <h2>GOAL PLANNING</h2>
+  <ul>
+    <li>I want to reach a 700 credit score. &rarr; <span>Goal Planning Engine</span></li>
+    <li>I want to buy a house in 2 years. &rarr; <span>Mortgage Goal Plan</span></li>
+    <li>I want to finance a car. &rarr; <span>Vehicle Goal Plan</span></li>
+    <li>I want to qualify for better cards. &rarr; <span>Credit Growth Plan</span></li>
+  </ul>
+
+</section>
+
+
+<img src="https://www.primevideo.com/detail/0KMW6L8V9R6CVJT82YXFKEO46U" alt="Here is the opening sequence of Monkey D Luffy from my favorite show one piece. ">
+<iframe width="560" height="315" src="https://www.youtube.com/embed/gl-g9k0qm5Q?si=yO0j4jyG4vDtZdVz" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+</body>
+
+</html>
